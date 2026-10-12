@@ -19,6 +19,13 @@ export class SessionManager {
   /** Session ms at which audio.webm starts (the recorder starts after the session clock). */
   private audioOffsetMs: number | null = null;
 
+  /** Folder that holds all session folders (created on demand). */
+  static rootDir(): string {
+    const dir = join(app.getPath('userData'), 'sessions');
+    mkdirSync(dir, { recursive: true });
+    return dir;
+  }
+
   get info(): SessionInfo | null {
     return this.current;
   }
@@ -31,7 +38,7 @@ export class SessionManager {
     if (this.current) return this.current;
     const clock = SessionClock.start();
     const id = sessionId(new Date(clock.startedAtWall));
-    const dir = join(app.getPath('userData'), 'sessions', id);
+    const dir = join(SessionManager.rootDir(), id);
     mkdirSync(dir, { recursive: true });
     this.current = { id, dir, clock };
     this.segments = [];

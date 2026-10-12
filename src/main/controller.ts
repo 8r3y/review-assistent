@@ -1,4 +1,4 @@
-import { BrowserWindow, MessageChannelMain, app, type Tray } from 'electron';
+import { BrowserWindow, MessageChannelMain, app, shell } from 'electron';
 import { join } from 'node:path';
 import type {
   AppState,
@@ -18,7 +18,7 @@ import { SecretStore } from './secrets';
 import { SessionManager } from './session';
 import { SettingsStore } from './settings';
 import { AppStore } from './state';
-import { createTray } from './tray';
+import { TrayController } from './tray';
 import { createCaptureWindow } from './windows/capture';
 import { createControlWindow } from './windows/control';
 import { OverlayWindow, clampOpacity } from './windows/overlay';
@@ -36,7 +36,7 @@ export class AppController {
   private overlay!: OverlayWindow;
   private control!: BrowserWindow;
   private capture!: CaptureHost;
-  private tray!: Tray;
+  private tray!: TrayController;
   private quitting = false;
 
   constructor() {
@@ -70,13 +70,23 @@ export class AppController {
     this.overlay.win.once('ready-to-show', () => this.overlay.setVisible(this.store.get().overlay.visible));
     this.control = createControlWindow(() => this.quitting);
     this.capture = new CaptureHost(createCaptureWindow());
-    this.tray = createTray({
+    this.tray = new TrayController({
       showControl: () => this.showControl(),
       toggleSession: () => this.toggleSession(),
-      toggleOverlay: () => this.setOverlayVisible(!this.store.get().overlay.visible),
+      setOverlayVisible: (visible) => this.setOverlayVisible(visible),
+      setOverlayMode: (mode) => this.setOverlayMode(mode),
+      setOverlayOpacity: (opacity) => this.setOverlayOpacity(opacity),
+      setRecordAudio: (recordAudio) => this.setAudioSettings({ recordAudio }),
+      openSessionsFolder: () => void shell.openPath(SessionManager.rootDir()),
+      openCurrentSessionFolder: () => {
+        const dir = this.store.get().session.dir;
+        if (dir) void shell.openPath(dir);
+      },
       quit: () => this.quit(),
     });
+    this.store.subscribe((state) => this.tray.update(state));
     this.registerHotkeys();
+    this.tray.update(this.store.get());
     this.pipeline.start();
   }
 

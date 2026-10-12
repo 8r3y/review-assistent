@@ -1,7 +1,7 @@
 import { BrowserWindow } from 'electron';
 import { loadPage, preloadPath } from './load';
 
-/** Main UI window. Closing it hides to the tray; the app quits from the tray menu. */
+/** Main UI window. Minimizing or closing it hides it to the tray; the app quits from the tray menu. */
 export function createControlWindow(isQuitting: () => boolean): BrowserWindow {
   const win = new BrowserWindow({
     width: 960,
@@ -14,6 +14,9 @@ export function createControlWindow(isQuitting: () => boolean): BrowserWindow {
     webPreferences: { preload: preloadPath('control'), sandbox: false, contextIsolation: true },
   });
   win.once('ready-to-show', () => win.show());
+  // A hidden window has no taskbar button, so the app lives only in the tray until reopened
+  // (showControl restores the minimized state).
+  win.on('minimize', () => win.hide());
   win.on('close', (event) => {
     if (isQuitting()) return;
     event.preventDefault();
