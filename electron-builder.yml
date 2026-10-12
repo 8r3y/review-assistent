@@ -1,0 +1,21 @@
+appId: ru.nsstms.review-assistent
+productName: Review Assistent
+directories:
+  buildResources: build
+  output: dist
+files:
+  - out/**
+  - package.json
+asarUnpack:
+  - resources/**
+  - node_modules/ffmpeg-static/**
+  - node_modules/sherpa-onnx-*/**
+extraResources:
+  - from: resources
+    to: resources
+    filter: ['**/*']
+win:
+  target: nsis
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true

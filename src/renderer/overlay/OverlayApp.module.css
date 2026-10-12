@@ -1,0 +1,118 @@
+:global(html),
+:global(body),
+:global(#root) {
+  height: 100%;
+  background: transparent;
+  overflow: hidden;
+  user-select: none;
+}
+
+.root {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  border-radius: 10px;
+  background: rgba(12, 12, 16, 0.72);
+  color: #f2f2f5;
+  overflow: hidden;
+}
+
+.handle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 10px;
+  flex: none;
+  font-size: 12px;
+  background: rgba(255, 255, 255, 0.06);
+  -webkit-app-region: drag;
+  cursor: move;
+}
+
+.grip {
+  opacity: 0.6;
+}
+
+.spacer {
+  flex: 1;
+}
+
+.muted {
+  color: rgba(242, 242, 245, 0.6);
+}
+
+.rec {
+  color: #ff6369;
+  font-variant-numeric: tabular-nums;
+}
+
+.talkIdle,
+.talkOwner,
+.talkOther {
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.08);
+  color: rgba(242, 242, 245, 0.45);
+  transition:
+    background 120ms,
+    color 120ms;
+}
+
+.talkOwner {
+  background: rgba(111, 220, 156, 0.25);
+  color: #6fdc9c;
+}
+
+.talkOther {
+  background: rgba(124, 180, 255, 0.25);
+  color: #7cb4ff;
+}
+
+.captions {
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  flex: 1;
+  padding: 8px 14px 12px;
+  gap: 4px;
+  overflow: hidden;
+}
+
+.line {
+  margin: 0;
+  font-size: 18px;
+  line-height: 1.35;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.6);
+}
+
+.partial {
+  margin: 0;
+  font-size: 18px;
+  line-height: 1.35;
+  color: rgba(242, 242, 245, 0.6);
+  font-style: italic;
+}
+
+.hint {
+  margin: 0;
+  color: rgba(242, 242, 245, 0.55);
+}
+
+.error {
+  margin: 0;
+  color: #ff8a8e;
+  font-size: 14px;
+}
+
+.speaker,
+.owner {
+  display: inline-block;
+  min-width: 2.2em;
+  margin-right: 8px;
+  font-weight: 600;
+  color: #7cb4ff;
+}
+
+.owner {
+  color: #6fdc9c;
+}

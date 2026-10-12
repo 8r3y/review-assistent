@@ -1,0 +1,34 @@
+:root {
+  --bg: #f7f7f8;
+  --surface: #ffffff;
+  --text: #1b1b1f;
+  --muted: #6b6b76;
+  --border: #e2e2e7;
+  --accent: #3b8af0;
+  --danger: #e5484d;
+  --ok: #30a46c;
+  font-family: 'Segoe UI', system-ui, sans-serif;
+  font-size: 14px;
+  color-scheme: light dark;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #17171a;
+    --surface: #202024;
+    --text: #ececf1;
+    --muted: #9b9ba6;
+    --border: #33333a;
+  }
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  color: var(--text);
+}

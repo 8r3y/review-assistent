@@ -1,0 +1,183 @@
+:global(body) {
+  background: var(--bg);
+}
+
+.root {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  max-width: 880px;
+  margin: 0 auto;
+  padding: 20px;
+}
+
+.card {
+  padding: 16px 20px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+}
+
+.card h2 {
+  margin: 0 0 12px;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  margin: 8px 0;
+}
+
+.label {
+  min-width: 120px;
+  color: var(--muted);
+}
+
+.spacer {
+  flex: 1;
+}
+
+.timer {
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+}
+
+.primary,
+.danger {
+  padding: 6px 16px;
+  border: none;
+  border-radius: 6px;
+  color: #fff;
+  font: inherit;
+  cursor: pointer;
+}
+
+.primary {
+  background: var(--accent);
+}
+
+.danger {
+  background: var(--danger);
+}
+
+.ok {
+  color: var(--ok);
+}
+
+.bad {
+  color: var(--danger);
+}
+
+.muted {
+  color: var(--muted);
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.table td {
+  padding: 6px 4px;
+  border-top: 1px solid var(--border);
+}
+
+kbd {
+  padding: 1px 6px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-family: inherit;
+  font-size: 12px;
+}
+
+.secondary {
+  padding: 4px 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  cursor: pointer;
+}
+
+button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+input:not([type]),
+input[type='password'],
+select {
+  min-width: 220px;
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+}
+
+.short {
+  min-width: 80px !important;
+  width: 80px;
+}
+
+.meter {
+  position: relative;
+  flex: 1;
+  max-width: 320px;
+  height: 8px;
+  border-radius: 4px;
+  background: var(--border);
+  overflow: hidden;
+}
+
+.meterFill,
+.meterSpeech {
+  height: 100%;
+  background: var(--muted);
+  transition: width 80ms linear;
+}
+
+.meterSpeech {
+  background: var(--ok);
+}
+
+.transcript {
+  max-height: 320px;
+  overflow-y: auto;
+}
+
+.segment {
+  margin: 0 0 6px;
+  line-height: 1.45;
+}
+
+.partial {
+  color: var(--muted);
+  font-style: italic;
+}
+
+.time {
+  display: inline-block;
+  min-width: 3.5em;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.owner,
+.speaker {
+  display: inline-block;
+  min-width: 2.2em;
+  margin-right: 8px;
+  font-weight: 600;
+  color: var(--accent);
+}
+
+.owner {
+  color: var(--ok);
+}
