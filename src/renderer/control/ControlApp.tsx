@@ -1,11 +1,20 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
+import {
+  DEFAULT_ENDPOINTS,
+  LLM_PROVIDERS,
+  type Effort,
+  type LlmProviderId,
+  type LlmRoute,
+  type LlmTask,
+} from '@shared/assistant';
 import { formatSessionTime } from '@shared/clock';
 import type { AppState, HotkeyAction, OverlayMode } from '@shared/ipc';
-import { OWNER, speakerLabel, type ChannelActivity, type SttStatus } from '@shared/transcript';
+import type { ChannelActivity, SttStatus } from '@shared/transcript';
 import { levelFraction } from '../common/activity';
 import { useAppState, useNow } from '../common/useAppState';
-import { useAudioActivity, useTranscript } from '../common/useTranscript';
+import { useAudioActivity } from '../common/useTranscript';
 import styles from './ControlApp.module.css';
+import { Workspace } from './Workspace';
 
 const HOTKEY_LABELS: Record<HotkeyAction, string> = {
   'session.toggle': 'Старт/стоп сессии',
@@ -16,7 +25,11 @@ const HOTKEY_LABELS: Record<HotkeyAction, string> = {
   'video.toggle': 'Видеозапись старт/стоп',
   screenshot: 'Скриншот',
   marker: 'Маркер',
-  'summarize.now': 'Суммаризировать реплику',
+  'question.answer': 'Ответить на текущий вопрос',
+  'question.mark': 'Это вопрос (последние фразы собеседника)',
+  'question.prev': 'Предыдущий вопрос',
+  'question.next': 'Следующий вопрос',
+  'question.dismiss': 'Отклонить текущий вопрос',
 };
 
 const STT_STATUS_LABELS: Record<SttStatus, string> = {
@@ -33,9 +46,10 @@ export function ControlApp(): React.JSX.Element {
   return (
     <main className={styles.root}>
       <SessionCard state={state} />
-      <TranscriptCard />
+      <Workspace state={state} />
       <AudioCard state={state} />
       <SttCard state={state} />
+      <AssistantCard state={state} />
       <DiarizationCard state={state} />
       <OverlayCard state={state} />
       <HotkeysCard state={state} />
@@ -73,42 +87,6 @@ function SessionCard({ state }: { state: AppState }): React.JSX.Element {
       </div>
       {state.capture.error && <p className={styles.bad}>Захват звука: {state.capture.error}</p>}
       {dir && <p className={styles.muted}>Папка сессии: {dir}</p>}
-    </section>
-  );
-}
-
-function TranscriptCard(): React.JSX.Element {
-  const { segments, partials } = useTranscript();
-  const listRef = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    const el = listRef.current;
-    if (el) el.scrollTop = el.scrollHeight;
-  }, [segments, partials]);
-  const live = [partials.system, partials.mic].filter((p) => p !== null);
-  return (
-    <section className={styles.card}>
-      <h2>Транскрипт</h2>
-      <div ref={listRef} className={styles.transcript}>
-        {segments.length === 0 && live.length === 0 && <p className={styles.muted}>Пока пусто.</p>}
-        {segments.map((s) => (
-          <p key={s.id} className={styles.segment}>
-            <span className={styles.time}>{formatSessionTime(s.tStart)}</span>
-            <span className={s.speaker === OWNER ? styles.owner : styles.speaker}>
-              {speakerLabel(s.speaker)}
-            </span>
-            {s.text}
-          </p>
-        ))}
-        {live.map((p) => (
-          <p key={`partial-${p.channel}`} className={`${styles.segment} ${styles.partial}`}>
-            <span className={styles.time}>{formatSessionTime(p.tStart)}</span>
-            <span className={p.speaker === OWNER ? styles.owner : styles.speaker}>
-              {p.speaker ? speakerLabel(p.speaker) : '…'}
-            </span>
-            {p.text}
-          </p>
-        ))}
-      </div>
     </section>
   );
 }
@@ -226,6 +204,193 @@ function SttCard({ state }: { state: AppState }): React.JSX.Element {
       </div>
       {stt.error && <p className={styles.bad}>{stt.error}</p>}
     </section>
+  );
+}
+
+function AssistantCard({ state }: { state: AppState }): React.JSX.Element {
+  const { assistant } = state;
+  const [context, setContext] = useState<string | null>(null);
+  const [savedContext, setSavedContext] = useState('');
+  useEffect(() => {
+    void window.api.invoke('assistant:get-context').then((text) => {
+      setContext(text);
+      setSavedContext(text);
+    });
+  }, []);
+  return (
+    <section className={styles.card}>
+      <h2>Ассистент (LLM)</h2>
+      {LLM_PROVIDERS.map((p) => (
+        <div key={p.id}>
+          <ApiKeyRow provider={p.id} label={p.label} saved={assistant.keys[p.id]} />
+          {/* key: reset the field when the saved endpoint changes */}
+          <EndpointRow
+            key={assistant.endpoints[p.id] ?? ''}
+            provider={p.id}
+            endpoint={assistant.endpoints[p.id]}
+          />
+        </div>
+      ))}
+      <RouteRow task="analyze" label="Поиск вопросов" route={assistant.analyze} keys={assistant.keys} />
+      <RouteRow task="answer" label="Ответы" route={assistant.answer} keys={assistant.keys} />
+      <p className={styles.muted}>
+        Эндпоинт используется ровно как указан — например, адрес совместимого шлюза
+        (https://api.fastypass.com:8444). Через шлюз идут ключ и текст разговора.
+      </p>
+      <p className={styles.muted}>
+        Провайдер выбирается для каждой задачи отдельно, например быстрый Gemini Flash-Lite для поиска
+        вопросов и Claude для ответов. Изменения применяются со следующей сессии.
+      </p>
+      <label className={styles.column}>
+        <span className={styles.label}>Мой контекст — о себе, проекте, опыте; используется в ответах</span>
+        <textarea
+          className={styles.textarea}
+          rows={6}
+          value={context ?? ''}
+          disabled={context === null}
+          placeholder="Например: я backend-разработчик, 6 лет Go и Kafka; сейчас делаю платёжный сервис…"
+          onChange={(e) => setContext(e.target.value)}
+        />
+      </label>
+      <div className={styles.row}>
+        <button
+          className={styles.secondary}
+          disabled={context === null || context === savedContext}
+          onClick={() =>
+            void window.api
+              .invoke('assistant:set-context', context ?? '')
+              .then(() => setSavedContext(context ?? ''))
+          }
+        >
+          Сохранить контекст
+        </button>
+        {context !== null && context !== savedContext && <span className={styles.muted}>не сохранено</span>}
+      </div>
+      {assistant.error && <p className={styles.bad}>{assistant.error}</p>}
+    </section>
+  );
+}
+
+function EndpointRow({
+  provider,
+  endpoint,
+}: {
+  provider: LlmProviderId;
+  endpoint: string | null;
+}): React.JSX.Element {
+  const [value, setValue] = useState(endpoint ?? '');
+  const [error, setError] = useState<string | null>(null);
+  const dirty = value.trim() !== (endpoint ?? '');
+  const save = (url: string | null): void =>
+    void window.api.invoke('assistant:set-endpoint', provider, url).then(setError);
+  return (
+    <div className={styles.row}>
+      <span className={styles.label}>Эндпоинт</span>
+      <input
+        className={styles.wide}
+        placeholder={`${DEFAULT_ENDPOINTS[provider]} (официальный)`}
+        value={value}
+        onChange={(e) => {
+          setValue(e.target.value);
+          setError(null);
+        }}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' && dirty) save(value);
+        }}
+      />
+      <button className={styles.secondary} disabled={!dirty} onClick={() => save(value)}>
+        Сохранить
+      </button>
+      {endpoint && (
+        <button className={styles.secondary} onClick={() => save(null)}>
+          Официальный
+        </button>
+      )}
+      {error && <span className={styles.bad}>{error}</span>}
+    </div>
+  );
+}
+
+function ApiKeyRow({
+  provider,
+  label,
+  saved,
+}: {
+  provider: LlmProviderId;
+  label: string;
+  saved: boolean;
+}): React.JSX.Element {
+  const [key, setKey] = useState('');
+  return (
+    <div className={styles.row}>
+      <span className={styles.label}>Ключ {label}</span>
+      {saved ? (
+        <>
+          <span className={styles.ok}>сохранён (зашифрован)</span>
+          <button
+            className={styles.secondary}
+            onClick={() => void window.api.invoke('assistant:set-key', provider, null)}
+          >
+            Удалить
+          </button>
+        </>
+      ) : (
+        <>
+          <input
+            type="password"
+            placeholder="API-ключ"
+            value={key}
+            onChange={(e) => setKey(e.target.value)}
+          />
+          <button
+            className={styles.secondary}
+            disabled={!key.trim()}
+            onClick={() => void window.api.invoke('assistant:set-key', provider, key).then(() => setKey(''))}
+          >
+            Сохранить
+          </button>
+        </>
+      )}
+    </div>
+  );
+}
+
+function RouteRow({
+  task,
+  label,
+  route,
+  keys,
+}: {
+  task: LlmTask;
+  label: string;
+  route: LlmRoute;
+  keys: Record<LlmProviderId, boolean>;
+}): React.JSX.Element {
+  const set = (patch: Partial<LlmRoute>): void => void window.api.invoke('assistant:set-route', task, patch);
+  return (
+    <div className={styles.row}>
+      <span className={styles.label}>{label}</span>
+      <select value={route.provider} onChange={(e) => set({ provider: e.target.value as LlmProviderId })}>
+        {LLM_PROVIDERS.map((p) => (
+          <option key={p.id} value={p.id}>
+            {p.label}
+          </option>
+        ))}
+      </select>
+      {/* key: re-mount when the provider switches the model to its default */}
+      <input key={route.model} defaultValue={route.model} onBlur={(e) => set({ model: e.target.value })} />
+      effort
+      <select
+        className={styles.short}
+        value={route.effort}
+        onChange={(e) => set({ effort: e.target.value as Effort })}
+      >
+        <option value="low">low</option>
+        <option value="medium">medium</option>
+        <option value="high">high</option>
+      </select>
+      {!keys[route.provider] && <span className={styles.bad}>нет ключа</span>}
+    </div>
   );
 }
 

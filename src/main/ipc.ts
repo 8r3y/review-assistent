@@ -1,4 +1,5 @@
 import { ipcMain, type IpcMainInvokeEvent } from 'electron';
+import { LLM_PROVIDERS, type Effort, type LlmProviderId, type LlmRoute } from '@shared/assistant';
 import type { InvokeChannel, InvokeMap } from '@shared/ipc';
 import type { AppController } from './controller';
 
@@ -10,6 +11,9 @@ type Handlers = {
 };
 
 const asString = (value: unknown): string | undefined => (typeof value === 'string' ? value : undefined);
+const isEffort = (value: unknown): value is Effort =>
+  value === 'low' || value === 'medium' || value === 'high';
+const isProvider = (value: unknown): value is LlmProviderId => LLM_PROVIDERS.some((p) => p.id === value);
 
 export function registerIpc(app: AppController): void {
   const handlers: Handlers = {
@@ -44,6 +48,33 @@ export function registerIpc(app: AppController): void {
     },
     'stt:set-key': (_e, key) => app.setSttKey(asString(key) ?? null),
     'transcript:get': () => app.getTranscript(),
+    'turns:get': () => app.getTurns(),
+    'questions:get': () => app.getQuestions(),
+    'questions:answer': (_e, id) => app.answerQuestion(asString(id) ?? null),
+    'questions:dismiss': (_e, id) => app.dismissQuestion(asString(id) ?? null),
+    'questions:select': (_e, id) => {
+      const questionId = asString(id);
+      if (questionId) app.selectQuestion(questionId);
+    },
+    'questions:step': (_e, delta) => app.stepQuestion(Math.sign(Number(delta)) || 0),
+    'assistant:set-route': (_e, task, patch) => {
+      if (task !== 'analyze' && task !== 'answer') return;
+      const next: Partial<LlmRoute> = {};
+      const model = asString(patch.model)?.trim();
+      if (isProvider(patch.provider)) next.provider = patch.provider;
+      if (model) next.model = model;
+      if (isEffort(patch.effort)) next.effort = patch.effort;
+      app.setAssistantRoute(task, next);
+    },
+    'assistant:set-endpoint': (_e, provider, url) =>
+      isProvider(provider)
+        ? app.setAssistantEndpoint(provider, asString(url) ?? null)
+        : 'Неизвестный провайдер',
+    'assistant:set-key': (_e, provider, key) => {
+      if (isProvider(provider)) app.setAssistantKey(provider, asString(key) ?? null);
+    },
+    'assistant:get-context': () => app.getOwnerContext(),
+    'assistant:set-context': (_e, text) => app.setOwnerContext(asString(text) ?? ''),
     'capture:audio-chunk': (event, chunk) => {
       if (app.isCaptureSender(event.sender) && chunk instanceof ArrayBuffer) app.appendAudioChunk(chunk);
     },

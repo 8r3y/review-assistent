@@ -11,10 +11,12 @@ import {
   type PcmMessage,
   type Segment,
 } from '@shared/transcript';
+import { AssistantEngine } from './assistant/engine';
 import { ChannelProcessor } from './channel';
 import { OnlineDiarizer } from './diarization/diarizer';
 import { SpeakerEmbedder } from './diarization/embedder';
 import { PcmHistory } from './diarization/pcm-history';
+import { createLlm } from './llm/router';
 import { DeepgramProvider } from './stt/deepgram';
 import type { SttProvider } from './stt/provider';
 import { LeakFilter } from './transcript/dedup';
@@ -36,6 +38,8 @@ export class PipelineSession {
   private readonly embedder: SpeakerEmbedder | null;
   private readonly diarizer: OnlineDiarizer;
   private readonly systemAudio = new PcmHistory(PCM_SAMPLE_RATE, PCM_HISTORY_MS);
+  private readonly questionsLog: WriteStream;
+  private readonly assistant: AssistantEngine;
   private stopped = false;
 
   constructor(
@@ -51,6 +55,29 @@ export class PipelineSession {
       minSegmentMs: config.diarization.minSegmentMs,
       maxHistory: 300,
     });
+    this.questionsLog = createWriteStream(join(config.dir, 'questions.jsonl'), { flags: 'a' });
+    const llm = createLlm(config.assistant);
+    this.assistant = new AssistantEngine({
+      send,
+      persist: (record) =>
+        this.questionsLog.write(`${JSON.stringify(record)}
+`),
+      now: () => this.clock.now(),
+      provider: llm.provider,
+      unavailable: llm.unavailable,
+    });
+  }
+
+  answer(questionId: string | null): void {
+    void this.assistant.answer(questionId);
+  }
+
+  markQuestion(): void {
+    void this.assistant.markQuestion();
+  }
+
+  dismissQuestion(questionId: string): void {
+    this.assistant.dismiss(questionId);
   }
 
   handlePcm(message: PcmMessage): void {
@@ -76,7 +103,9 @@ export class PipelineSession {
     if (this.stopped) return;
     this.stopped = true;
     await Promise.all([...this.channels.values()].map((c) => c.close()));
+    this.assistant.stop();
     await new Promise<void>((resolve) => this.transcript.end(resolve));
+    await new Promise<void>((resolve) => this.questionsLog.end(resolve));
   }
 
   private loadEmbedder(): SpeakerEmbedder | null {
@@ -130,11 +159,13 @@ export class PipelineSession {
     for (const segmentId of decision.retract) {
       this.send({ type: 'retract', segmentId });
       this.write({ type: 'retract', segmentId });
+      this.assistant.retract(segmentId);
     }
     if (!decision.accept) return;
     const final = segment.channel === 'system' ? this.diarize(segment) : segment;
     this.send({ type: 'final', segment: final });
     this.write({ type: 'segment', ...final });
+    this.assistant.addSegment(final);
   }
 
   /** Assigns the speaker from the local diarizer and publishes corrections of earlier segments. */
@@ -150,6 +181,7 @@ export class PipelineSession {
     for (const relabel of result.relabels) {
       this.send({ type: 'relabel', ...relabel });
       this.write({ type: 'relabel', ...relabel });
+      this.assistant.relabel(relabel.segmentId, relabel.speaker);
     }
     return { ...segment, speaker: result.speaker };
   }

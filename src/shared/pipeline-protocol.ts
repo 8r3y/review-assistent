@@ -1,4 +1,5 @@
 // Messages between the main process and the pipeline utility process.
+import type { AssistantSettings, LlmProviderId, Question, Turn } from './assistant';
 import type { AudioActivity, ChannelId, PartialText, Segment, SpeakerId, SttStatus } from './transcript';
 
 export interface VadConfig {
@@ -35,6 +36,16 @@ export interface SttConfig {
   language: string;
 }
 
+export interface AssistantConfig {
+  /** API keys per provider; a task whose provider has no key is unavailable (turns are still built). */
+  keys: Record<LlmProviderId, string | null>;
+  /** Custom base URL per provider (an API-compatible gateway); null → the official endpoint. */
+  endpoints: Record<LlmProviderId, string | null>;
+  settings: AssistantSettings;
+  /** The owner's notes about themselves/their work, used for answers. */
+  ownerContext: string;
+}
+
 export interface PipelineSessionConfig {
   sessionId: string;
   startedAtWall: number;
@@ -43,6 +54,7 @@ export interface PipelineSessionConfig {
   gate: GateConfig;
   diarization: DiarizationConfig;
   stt: SttConfig;
+  assistant: AssistantConfig;
 }
 
 export type MainToPipeline =
@@ -51,6 +63,10 @@ export type MainToPipeline =
   | { type: 'session:start'; config: PipelineSessionConfig }
   | { type: 'session:stop' }
   | { type: 'diarization:set-threshold'; threshold: number }
+  /** questionId null: first turn the last remote turns into a question, then answer it. */
+  | { type: 'assistant:answer'; questionId: string | null }
+  | { type: 'assistant:mark-question' }
+  | { type: 'assistant:dismiss'; questionId: string }
   /** Carries the capture → pipeline MessagePort in `ports[0]`. */
   | { type: 'audio-port' };
 
@@ -64,4 +80,8 @@ export type PipelineToMain =
   | { type: 'retract'; segmentId: string }
   /** Re-clustering changed the speaker of an earlier segment. */
   | { type: 'relabel'; segmentId: string; speaker: SpeakerId }
+  | { type: 'turns'; upserts: Turn[]; removed: string[] }
+  /** focus: the owner asked for this question (hotkey), the overlay should switch to it. */
+  | { type: 'question'; question: Question; focus: boolean }
+  | { type: 'assistant-error'; message: string }
   | { type: 'session:stopped' };

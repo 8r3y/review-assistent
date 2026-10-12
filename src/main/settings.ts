@@ -1,6 +1,13 @@
 import { app, type Rectangle } from 'electron';
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
+import {
+  DEFAULT_MODELS,
+  type AssistantSettings,
+  type LlmProviderId,
+  type LlmRoute,
+  type LlmTask,
+} from '@shared/assistant';
 import type { AudioSettings, HotkeyBindings, OverlayMode, SttSettings } from '@shared/ipc';
 import type { DiarizationConfig, GateConfig, VadConfig } from '@shared/pipeline-protocol';
 
@@ -12,6 +19,11 @@ export interface Settings {
   vad: Omit<VadConfig, 'modelPath'>;
   gate: GateConfig;
   diarization: Omit<DiarizationConfig, 'modelPath'>;
+  assistant: AssistantSettings;
+  /** Last model used per task and provider, restored when switching back to that provider. */
+  assistantModels: Record<LlmTask, Partial<Record<LlmProviderId, string>>>;
+  /** Custom API base URL per provider (gateways such as new-api); absent → official endpoint. */
+  assistantEndpoints: Partial<Record<LlmProviderId, string>>;
 }
 
 export const DEFAULT_HOTKEYS: HotkeyBindings = {
@@ -23,7 +35,11 @@ export const DEFAULT_HOTKEYS: HotkeyBindings = {
   'video.toggle': 'CommandOrControl+Alt+V',
   screenshot: 'CommandOrControl+Alt+P',
   marker: 'CommandOrControl+Alt+M',
-  'summarize.now': 'CommandOrControl+Alt+Y',
+  'question.answer': 'CommandOrControl+Alt+A',
+  'question.mark': 'CommandOrControl+Alt+Q',
+  'question.prev': 'CommandOrControl+Alt+Up',
+  'question.next': 'CommandOrControl+Alt+Down',
+  'question.dismiss': 'CommandOrControl+Alt+X',
 };
 
 const DEFAULTS: Settings = {
@@ -36,7 +52,34 @@ const DEFAULTS: Settings = {
   gate: { enabled: true, preRollMs: 500, closeAfterSilenceMs: 1500 },
   // Tuned on a recorded call (ERes2Net embeddings); raise it if different voices get merged.
   diarization: { threshold: 0.3, minSegmentMs: 1500 },
+  assistant: {
+    // Question detection runs on every relevant turn: keep it fast.
+    analyze: { provider: 'anthropic', model: DEFAULT_MODELS.anthropic.analyze, effort: 'low' },
+    answer: { provider: 'anthropic', model: DEFAULT_MODELS.anthropic.answer, effort: 'low' },
+  },
+  assistantModels: { analyze: {}, answer: {} },
+  assistantEndpoints: {},
 };
+
+/** Settings written before per-task providers stored flat Claude-only fields. */
+interface LegacyAssistant {
+  analyzeModel?: string;
+  answerModel?: string;
+  analyzeEffort?: LlmRoute['effort'];
+  answerEffort?: LlmRoute['effort'];
+}
+
+function loadAssistant(stored: Partial<AssistantSettings> & LegacyAssistant = {}): AssistantSettings {
+  const legacy = (task: 'analyze' | 'answer'): Partial<LlmRoute> => {
+    const model = task === 'analyze' ? stored.analyzeModel : stored.answerModel;
+    const effort = task === 'analyze' ? stored.analyzeEffort : stored.answerEffort;
+    return { ...(model ? { model } : {}), ...(effort ? { effort } : {}) };
+  };
+  return {
+    analyze: { ...DEFAULTS.assistant.analyze, ...legacy('analyze'), ...stored.analyze },
+    answer: { ...DEFAULTS.assistant.answer, ...legacy('answer'), ...stored.answer },
+  };
+}
 
 const SAVE_DELAY_MS = 500;
 
@@ -73,7 +116,20 @@ export class SettingsStore {
       const stored = JSON.parse(readFileSync(this.file, 'utf8')) as Partial<Settings>;
       return {
         overlay: { ...DEFAULTS.overlay, ...stored.overlay },
-        hotkeys: { ...DEFAULTS.hotkeys, ...stored.hotkeys },
+        // Only known actions: renamed or removed ones from older versions are dropped.
+        hotkeys: Object.fromEntries(
+          Object.entries(DEFAULTS.hotkeys).map(([action, accelerator]) => [
+            action,
+            (stored.hotkeys as Partial<HotkeyBindings> | undefined)?.[action as keyof HotkeyBindings] ??
+              accelerator,
+          ]),
+        ) as HotkeyBindings,
+        assistant: loadAssistant(stored.assistant),
+        assistantEndpoints: { ...stored.assistantEndpoints },
+        assistantModels: {
+          analyze: { ...stored.assistantModels?.analyze },
+          answer: { ...stored.assistantModels?.answer },
+        },
         audio: { ...DEFAULTS.audio, ...stored.audio },
         stt: { ...DEFAULTS.stt, ...stored.stt },
         vad: { ...DEFAULTS.vad, ...stored.vad },

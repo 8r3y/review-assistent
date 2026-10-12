@@ -1,4 +1,5 @@
 // IPC contracts shared by main, preload and renderer. Types only plus channel name lists.
+import type { AssistantSettings, LlmProviderId, LlmRoute, LlmTask, Question, Turn } from './assistant';
 import type { AudioActivity, ChannelId, PartialText, Segment, SpeakerId, SttStatus } from './transcript';
 
 export type OverlayMode = 'interactive' | 'passthrough';
@@ -16,7 +17,11 @@ export type HotkeyAction =
   | 'video.toggle'
   | 'screenshot'
   | 'marker'
-  | 'summarize.now';
+  | 'question.answer'
+  | 'question.mark'
+  | 'question.prev'
+  | 'question.next'
+  | 'question.dismiss';
 
 export type HotkeyBindings = Record<HotkeyAction, string>;
 
@@ -56,6 +61,13 @@ export interface AppState {
     error: string | null;
   };
   overlay: { visible: boolean; mode: OverlayMode; opacity: number };
+  assistant: AssistantSettings & {
+    keys: Record<LlmProviderId, boolean>;
+    endpoints: Record<LlmProviderId, string | null>;
+    error: string | null;
+  };
+  /** The question shown in the overlay and targeted by hotkeys. */
+  questions: { currentId: string | null; index: number; total: number };
   hotkeys: HotkeyStatus[];
   pipeline: { alive: boolean };
 }
@@ -84,6 +96,22 @@ export interface InvokeMap {
   /** null removes the stored key. */
   'stt:set-key': (key: string | null) => void;
   'transcript:get': () => Segment[];
+  'turns:get': () => Turn[];
+  'questions:get': () => Question[];
+  /** null → the current question; with none, the last remote turns become a question first. */
+  'questions:answer': (questionId: string | null) => void;
+  'questions:dismiss': (questionId: string) => void;
+  'questions:select': (questionId: string) => void;
+  /** -1 previous, +1 next. */
+  'questions:step': (delta: number) => void;
+  /** Switching the provider without a model picks that provider's default model for the task. */
+  'assistant:set-route': (task: LlmTask, patch: Partial<LlmRoute>) => void;
+  /** null removes the stored key. */
+  'assistant:set-key': (provider: LlmProviderId, key: string | null) => void;
+  /** null or empty → the official endpoint. Resolves with an error message for an invalid URL. */
+  'assistant:set-endpoint': (provider: LlmProviderId, url: string | null) => string | null;
+  'assistant:get-context': () => string;
+  'assistant:set-context': (context: string) => void;
   /** Capture window only: a MediaRecorder chunk of audio.webm. */
   'capture:audio-chunk': (chunk: ArrayBuffer) => void;
 }
@@ -97,8 +125,10 @@ export interface EventMap {
   'transcript:retract': (segmentId: string) => void;
   /** Diarization re-clustering changed the speaker of a published segment. */
   'transcript:relabel': (segmentId: string, speaker: SpeakerId) => void;
-  /** A new session started: drop the previous transcript. */
+  /** A new session started: drop the previous transcript, turns and questions. */
   'transcript:reset': () => void;
+  'turns:changed': (upserts: Turn[], removed: string[]) => void;
+  'questions:changed': (question: Question) => void;
 }
 
 export type InvokeChannel = keyof InvokeMap;
@@ -116,6 +146,17 @@ export const INVOKE_CHANNELS = [
   'diarization:set-settings',
   'stt:set-key',
   'transcript:get',
+  'turns:get',
+  'questions:get',
+  'questions:answer',
+  'questions:dismiss',
+  'questions:select',
+  'questions:step',
+  'assistant:set-route',
+  'assistant:set-key',
+  'assistant:set-endpoint',
+  'assistant:get-context',
+  'assistant:set-context',
   'capture:audio-chunk',
 ] as const satisfies readonly InvokeChannel[];
 
@@ -127,6 +168,8 @@ export const EVENT_CHANNELS = [
   'transcript:retract',
   'transcript:relabel',
   'transcript:reset',
+  'turns:changed',
+  'questions:changed',
 ] as const satisfies readonly EventChannel[];
 
 export interface RendererApi {

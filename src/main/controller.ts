@@ -9,12 +9,22 @@ import type {
   OverlayMode,
   SttSettings,
 } from '@shared/ipc';
+import {
+  DEFAULT_MODELS,
+  type LlmProviderId,
+  type LlmRoute,
+  type LlmTask,
+  type Question,
+  type Turn,
+} from '@shared/assistant';
 import type { PipelineToMain } from '@shared/pipeline-protocol';
 import type { Segment } from '@shared/transcript';
 import { CaptureHost, installDisplayMediaHandler } from './capture-host';
 import { registerHotkeys, unregisterHotkeys } from './hotkeys';
+import { readOwnerContext, writeOwnerContext } from './owner-context';
 import { PipelineHost } from './pipeline-host';
-import { SecretStore } from './secrets';
+import { QuestionsView } from './questions-view';
+import { SecretStore, type SecretName } from './secrets';
 import { SessionManager } from './session';
 import { SettingsStore } from './settings';
 import { AppStore } from './state';
@@ -25,6 +35,12 @@ import { OverlayWindow, clampOpacity } from './windows/overlay';
 
 const OPACITY_STEP = 0.1;
 const PIPELINE_STOP_TIMEOUT_MS = 8000;
+/** Assistant errors (bad key, refusal…) stay visible this long. */
+const ASSISTANT_ERROR_MS = 12_000;
+const LLM_SECRETS: Record<LlmProviderId, SecretName> = {
+  anthropic: 'anthropicApiKey',
+  google: 'googleApiKey',
+};
 
 /** Wires windows, hotkeys, tray, session, capture and pipeline around the shared AppStore. */
 export class AppController {
@@ -38,9 +54,12 @@ export class AppController {
   private capture!: CaptureHost;
   private tray!: TrayController;
   private quitting = false;
+  private readonly turns = new Map<string, Turn>();
+  private readonly questions = new QuestionsView();
+  private assistantErrorTimer: NodeJS.Timeout | null = null;
 
   constructor() {
-    const { overlay, audio, stt, diarization } = this.settings.get();
+    const { overlay, audio, stt, diarization, assistant } = this.settings.get();
     this.store = new AppStore({
       session: { status: 'idle', startedAt: null, dir: null },
       capture: { status: 'idle', error: null },
@@ -53,6 +72,8 @@ export class AppController {
         error: null,
       },
       overlay: { visible: true, mode: overlay.mode, opacity: clampOpacity(overlay.opacity) },
+      assistant: { ...assistant, keys: this.llmKeyFlags(), endpoints: this.llmEndpoints(), error: null },
+      questions: this.questions.nav(),
       hotkeys: [],
       pipeline: { alive: false },
     });
@@ -77,6 +98,7 @@ export class AppController {
       setOverlayMode: (mode) => this.setOverlayMode(mode),
       setOverlayOpacity: (opacity) => this.setOverlayOpacity(opacity),
       setRecordAudio: (recordAudio) => this.setAudioSettings({ recordAudio }),
+      answerQuestion: () => this.answerQuestion(null),
       openSessionsFolder: () => void shell.openPath(SessionManager.rootDir()),
       openCurrentSessionFolder: () => {
         const dir = this.store.get().session.dir;
@@ -123,9 +145,13 @@ export class AppController {
 
   async startSession(): Promise<void> {
     if (this.store.get().session.status !== 'idle') return;
-    const { audio, stt, vad, gate, diarization } = this.settings.get();
+    const { audio, stt, vad, gate, diarization, assistant } = this.settings.get();
     const info = this.session.start({ recordAudio: audio.recordAudio });
+    this.turns.clear();
+    this.questions.reset();
     broadcast('transcript:reset');
+    this.setAssistantError(null);
+    this.store.update((s) => ({ ...s, questions: this.questions.nav() }));
     this.store.update((s) => ({
       ...s,
       session: { status: 'starting', startedAt: info.clock.startedAtWall, dir: info.dir },
@@ -144,6 +170,12 @@ export class AppController {
         gate,
         diarization: { ...diarization, modelPath: modelPath('speaker_eres2net_base_16k.onnx') },
         stt: { provider: 'deepgram', apiKey, ...stt },
+        assistant: {
+          keys: { anthropic: this.secrets.get('anthropicApiKey'), google: this.secrets.get('googleApiKey') },
+          endpoints: this.llmEndpoints(),
+          settings: assistant,
+          ownerContext: readOwnerContext(),
+        },
       },
     });
     if (!apiKey) {
@@ -215,6 +247,108 @@ export class AppController {
     }
   }
 
+  getTurns(): Turn[] {
+    return [...this.turns.values()];
+  }
+
+  getQuestions(): Question[] {
+    return this.questions.list();
+  }
+
+  /** null → the current question (or, with none, the last remote turns made into a question). */
+  answerQuestion(questionId: string | null): void {
+    if (!this.requireRunningSession()) return;
+    this.pipeline.send({
+      type: 'assistant:answer',
+      questionId: questionId ?? this.questions.current()?.id ?? null,
+    });
+  }
+
+  markQuestion(): void {
+    if (!this.requireRunningSession()) return;
+    this.pipeline.send({ type: 'assistant:mark-question' });
+  }
+
+  dismissQuestion(questionId: string | null): void {
+    const id = questionId ?? this.questions.current()?.id;
+    if (id && this.requireRunningSession()) this.pipeline.send({ type: 'assistant:dismiss', questionId: id });
+  }
+
+  selectQuestion(questionId: string): void {
+    this.questions.select(questionId, Date.now());
+    this.store.update((s) => ({ ...s, questions: this.questions.nav() }));
+  }
+
+  stepQuestion(delta: number): void {
+    this.questions.step(delta, Date.now());
+    this.store.update((s) => ({ ...s, questions: this.questions.nav() }));
+  }
+
+  setAssistantRoute(task: LlmTask, patch: Partial<LlmRoute>): void {
+    const { assistant, assistantModels } = this.settings.get();
+    const current = assistant[task];
+    const route: LlmRoute = { ...current, ...patch };
+    if (patch.provider && patch.provider !== current.provider && !patch.model) {
+      route.model = assistantModels[task][patch.provider] ?? DEFAULT_MODELS[patch.provider][task];
+    }
+    // Remember the model per provider so switching providers back and forth does not lose it.
+    const models = {
+      ...assistantModels,
+      [task]: { ...assistantModels[task], [current.provider]: current.model, [route.provider]: route.model },
+    };
+    this.settings.update((s) => ({
+      ...s,
+      assistant: { ...s.assistant, [task]: route },
+      assistantModels: models,
+    }));
+    this.store.update((s) => ({ ...s, assistant: { ...s.assistant, [task]: route } }));
+  }
+
+  setAssistantKey(provider: LlmProviderId, key: string | null): void {
+    this.secrets.set(LLM_SECRETS[provider], key?.trim() || null);
+    this.store.update((s) => ({ ...s, assistant: { ...s.assistant, keys: this.llmKeyFlags() } }));
+  }
+
+  /** @returns an error message for an invalid URL; empty or null restores the official endpoint. */
+  setAssistantEndpoint(provider: LlmProviderId, url: string | null): string | null {
+    const value = url?.trim() || null;
+    if (value) {
+      let parsed: URL;
+      try {
+        parsed = new URL(value);
+      } catch {
+        return 'Некорректный адрес';
+      }
+      if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:')
+        return 'Адрес должен начинаться с https://';
+    }
+    this.settings.update((s) => {
+      const endpoints = { ...s.assistantEndpoints };
+      if (value) endpoints[provider] = value;
+      else delete endpoints[provider];
+      return { ...s, assistantEndpoints: endpoints };
+    });
+    this.store.update((s) => ({ ...s, assistant: { ...s.assistant, endpoints: this.llmEndpoints() } }));
+    return null;
+  }
+
+  private llmEndpoints(): Record<LlmProviderId, string | null> {
+    const stored = this.settings.get().assistantEndpoints;
+    return { anthropic: stored.anthropic ?? null, google: stored.google ?? null };
+  }
+
+  private llmKeyFlags(): Record<LlmProviderId, boolean> {
+    return { anthropic: this.secrets.has('anthropicApiKey'), google: this.secrets.has('googleApiKey') };
+  }
+
+  getOwnerContext(): string {
+    return readOwnerContext();
+  }
+
+  setOwnerContext(text: string): void {
+    writeOwnerContext(text);
+  }
+
   setSttSettings(patch: Partial<SttSettings>): void {
     const stt = { ...this.settings.get().stt, ...patch };
     this.settings.update((s) => ({ ...s, stt }));
@@ -260,6 +394,20 @@ export class AppController {
         this.session.addSegment(message.segment);
         broadcast('transcript:final', message.segment);
         break;
+      case 'turns':
+        for (const id of message.removed) this.turns.delete(id);
+        for (const turn of message.upserts) this.turns.set(turn.id, turn);
+        broadcast('turns:changed', message.upserts, message.removed);
+        break;
+      case 'question':
+        this.questions.upsert(message.question, message.focus, Date.now());
+        broadcast('questions:changed', message.question);
+        if (message.question.answer?.error) this.setAssistantError(message.question.answer.error);
+        this.store.update((s) => ({ ...s, questions: this.questions.nav() }));
+        break;
+      case 'assistant-error':
+        this.setAssistantError(message.message);
+        break;
       case 'relabel':
         this.session.relabelSegment(message.segmentId, message.speaker);
         broadcast('transcript:relabel', message.segmentId, message.speaker);
@@ -290,8 +438,28 @@ export class AppController {
         this.setOverlayMode(overlay().mode === 'interactive' ? 'passthrough' : 'interactive'),
       'overlay.opacityDown': () => this.setOverlayOpacity(overlay().opacity - OPACITY_STEP),
       'overlay.opacityUp': () => this.setOverlayOpacity(overlay().opacity + OPACITY_STEP),
+      'question.answer': () => this.answerQuestion(null),
+      'question.mark': () => this.markQuestion(),
+      'question.prev': () => this.stepQuestion(-1),
+      'question.next': () => this.stepQuestion(1),
+      'question.dismiss': () => this.dismissQuestion(null),
     });
     this.store.update((s) => ({ ...s, hotkeys }));
+  }
+
+  private requireRunningSession(): boolean {
+    if (this.store.get().session.status === 'running') return true;
+    this.setAssistantError('Сессия не запущена');
+    return false;
+  }
+
+  private setAssistantError(error: string | null): void {
+    if (this.assistantErrorTimer) clearTimeout(this.assistantErrorTimer);
+    this.assistantErrorTimer = error
+      ? setTimeout(() => this.setAssistantError(null), ASSISTANT_ERROR_MS)
+      : null;
+    if (this.store.get().assistant.error === error) return;
+    this.store.update((s) => ({ ...s, assistant: { ...s.assistant, error } }));
   }
 
   private setPipelineAlive(alive: boolean): void {

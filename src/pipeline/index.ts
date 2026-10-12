@@ -34,6 +34,15 @@ parent.on('message', ({ data, ports }: { data: MainToPipeline; ports: MessagePor
       session = new PipelineSession(data.config, send);
       send({ type: 'log', level: 'info', message: `session ${data.config.sessionId} started` });
       break;
+    case 'assistant:answer':
+      session?.answer(data.questionId);
+      break;
+    case 'assistant:mark-question':
+      session?.markQuestion();
+      break;
+    case 'assistant:dismiss':
+      session?.dismissQuestion(data.questionId);
+      break;
     case 'diarization:set-threshold':
       session?.setDiarizationThreshold(data.threshold);
       break;

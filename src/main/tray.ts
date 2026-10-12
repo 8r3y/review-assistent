@@ -4,6 +4,7 @@ import type { AppState, HotkeyAction, OverlayMode } from '@shared/ipc';
 export interface TrayActions {
   showControl: () => void;
   toggleSession: () => void;
+  answerQuestion: () => void;
   setOverlayVisible: (visible: boolean) => void;
   setOverlayMode: (mode: OverlayMode) => void;
   setOverlayOpacity: (opacity: number) => void;
@@ -73,6 +74,12 @@ export class TrayController {
         click: a.toggleSession,
       },
       ...(problem ? [{ label: `⚠ ${truncate(problem, 60)}`, enabled: false }] : []),
+      {
+        label: 'Ответить на текущий вопрос',
+        enabled: running,
+        ...shortcut('question.answer'),
+        click: a.answerQuestion,
+      },
       {
         label: 'Записывать аудио',
         type: 'checkbox',
