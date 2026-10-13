@@ -8,7 +8,7 @@ import {
   type LlmTask,
 } from '@shared/assistant';
 import { formatSessionTime } from '@shared/clock';
-import type { AppState, HotkeyAction, OverlayMode } from '@shared/ipc';
+import type { AppState, HotkeyAction, OverlayMode, VideoSource } from '@shared/ipc';
 import type { ChannelActivity, SttStatus } from '@shared/transcript';
 import { levelFraction } from '../common/activity';
 import { useAppState, useNow } from '../common/useAppState';
@@ -48,6 +48,7 @@ export function ControlApp(): React.JSX.Element {
       <SessionCard state={state} />
       <Workspace state={state} />
       <AudioCard state={state} />
+      <VideoCard state={state} />
       <SttCard state={state} />
       <AssistantCard state={state} />
       <DiarizationCard state={state} />
@@ -127,6 +128,72 @@ function AudioCard({ state }: { state: AppState }): React.JSX.Element {
       <Meter label="Я (микрофон)" activity={activity.mic} />
       <Meter label="Собеседники (системный звук)" activity={activity.system} />
       {locked && <p className={styles.muted}>Настройки звука применяются к следующей сессии.</p>}
+    </section>
+  );
+}
+
+function VideoCard({ state }: { state: AppState }): React.JSX.Element {
+  const now = useNow(1000);
+  const [sources, setSources] = useState<VideoSource[] | null>(null);
+  const { video } = state;
+  const refresh = (): void => void window.api.invoke('video:list-sources').then(setSources);
+  useEffect(refresh, []);
+  const sessionRunning = state.session.status === 'running';
+  const recording = video.status === 'recording';
+  const busy = video.status === 'starting' || video.status === 'stopping';
+  // Saved source by id, or the primary screen when none is saved.
+  const selected = (s: VideoSource): boolean =>
+    video.sourceId ? s.id === video.sourceId : s === sources?.find((x) => x.kind === 'screen');
+  const pick = (s: VideoSource): void =>
+    void window.api.invoke('video:set-source', { id: s.id, name: s.name });
+  return (
+    <section className={styles.card}>
+      <h2>Видео</h2>
+      <div className={styles.row}>
+        <button
+          className={recording ? styles.danger : styles.primary}
+          disabled={busy || (!recording && !sessionRunning)}
+          onClick={() => void window.api.invoke(recording ? 'video:stop' : 'video:start')}
+        >
+          {video.status === 'starting'
+            ? 'Запуск…'
+            : video.status === 'stopping'
+              ? 'Остановка…'
+              : recording
+                ? 'Остановить запись'
+                : 'Записывать видео'}
+        </button>
+        <span className={styles.timer}>
+          {video.startedAt !== null ? formatSessionTime(now - video.startedAt) : '—'}
+        </span>
+        <span className={styles.muted}>{video.sourceName ?? 'Основной экран'}</span>
+        <span className={styles.spacer} />
+        <button className={styles.secondary} disabled={recording || busy} onClick={refresh}>
+          Обновить список
+        </button>
+      </div>
+      {video.error && <p className={styles.bad}>{video.error}</p>}
+      <div className={styles.sources}>
+        {sources?.map((s) => (
+          <button
+            key={s.id}
+            className={selected(s) ? styles.sourceSelected : styles.source}
+            disabled={recording || busy}
+            title={s.name}
+            onClick={() => pick(s)}
+          >
+            {s.thumbnail ? <img src={s.thumbnail} alt="" /> : <div className={styles.noThumb} />}
+            <span>
+              {s.kind === 'screen' ? '🖥 ' : ''}
+              {s.name}
+            </span>
+          </button>
+        ))}
+      </div>
+      <p className={styles.muted}>
+        Запись идёт во время сессии в её папку (до 1920×1080, 30 к/с). При остановке сессии в видео вшивается
+        звук разговора. Оверлей в запись не попадает. Горячая клавиша — в таблице ниже.
+      </p>
     </section>
   );
 }

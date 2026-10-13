@@ -1,8 +1,8 @@
 import type { CaptureStartOptions } from '@shared/ipc';
 import { PCM_SAMPLE_RATE, type ChannelId, type PcmMessage } from '@shared/transcript';
 import workletUrl from './pcm-worklet.ts?worker&url';
+import { startChunkedRecorder, type ChunkedRecorder } from './recorder';
 
-const RECORDER_TIMESLICE_MS = 1000;
 const RECORDER_BITRATE = 96_000;
 
 /**
@@ -13,8 +13,7 @@ const RECORDER_BITRATE = 96_000;
 export class AudioCapture {
   private streams: MediaStream[] = [];
   private contexts: AudioContext[] = [];
-  private recorder: MediaRecorder | null = null;
-  private recorderDone: Promise<void> = Promise.resolve();
+  private recorder: ChunkedRecorder | null = null;
 
   constructor(private readonly port: MessagePort) {}
 
@@ -37,8 +36,7 @@ export class AudioCapture {
   }
 
   async stop(): Promise<void> {
-    if (this.recorder && this.recorder.state !== 'inactive') this.recorder.stop();
-    await this.recorderDone;
+    await this.recorder?.stop();
     this.recorder = null;
     for (const stream of this.streams) for (const track of stream.getTracks()) track.stop();
     this.streams = [];
@@ -82,27 +80,12 @@ export class AudioCapture {
     destination.channelCount = 2;
     merger.connect(destination);
 
-    const recorder = new MediaRecorder(destination.stream, {
-      mimeType: 'audio/webm;codecs=opus',
-      audioBitsPerSecond: RECORDER_BITRATE,
-    });
-    let uploads = Promise.resolve();
-    recorder.ondataavailable = (event) => {
-      if (event.data.size === 0) return;
-      // Chain uploads so chunks reach main in order.
-      uploads = uploads.then(async () => {
-        await window.api.invoke('capture:audio-chunk', await event.data.arrayBuffer());
-      });
-    };
-    this.recorderDone = new Promise((resolve) => {
-      recorder.onstop = () => void uploads.then(resolve);
-    });
-    const started = new Promise<number>((resolve) => {
-      recorder.onstart = () => resolve(Date.now());
-    });
-    recorder.start(RECORDER_TIMESLICE_MS);
-    this.recorder = recorder;
-    return started;
+    this.recorder = await startChunkedRecorder(
+      destination.stream,
+      { mimeType: 'audio/webm;codecs=opus', audioBitsPerSecond: RECORDER_BITRATE },
+      (chunk) => window.api.invoke('capture:audio-chunk', chunk),
+    );
+    return this.recorder.startedAt;
   }
 }
 

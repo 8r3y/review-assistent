@@ -8,6 +8,25 @@ export type SessionStatus = 'idle' | 'starting' | 'running' | 'stopping';
 
 export type CaptureStatus = 'idle' | 'starting' | 'running' | 'error';
 
+export type VideoStatus = 'idle' | 'starting' | 'recording' | 'stopping';
+
+/** A screen or window that can be recorded. */
+export interface VideoSource {
+  /** desktopCapturer id: `screen:N:0` or `window:HANDLE:0`. */
+  id: string;
+  name: string;
+  kind: 'screen' | 'window';
+  /** PNG data URL preview. */
+  thumbnail: string;
+}
+
+export interface VideoSettings {
+  /** null → the primary screen. */
+  sourceId: string | null;
+  /** Remembered to find a window again after it was reopened (window ids change). */
+  sourceName: string | null;
+}
+
 export type HotkeyAction =
   | 'session.toggle'
   | 'overlay.toggleVisible'
@@ -61,6 +80,12 @@ export interface AppState {
     error: string | null;
   };
   overlay: { visible: boolean; mode: OverlayMode; opacity: number };
+  video: VideoSettings & {
+    status: VideoStatus;
+    /** Wall-clock ms when the current recording started. */
+    startedAt: number | null;
+    error: string | null;
+  };
   assistant: AssistantSettings & {
     keys: Record<LlmProviderId, boolean>;
     endpoints: Record<LlmProviderId, string | null>;
@@ -76,6 +101,15 @@ export interface AppState {
 export interface CaptureStartOptions {
   micDeviceId: string | null;
   recordAudio: boolean;
+}
+
+/** Options the capture window starts a video recording with. */
+export interface VideoStartOptions {
+  /** Upper bounds; the source is downscaled, never upscaled. */
+  maxWidth: number;
+  maxHeight: number;
+  maxFrameRate: number;
+  bitrate: number;
 }
 
 /** Height of the overlay's top handle bar, px. In passthrough mode the overlay accepts mouse input only there. */
@@ -112,8 +146,18 @@ export interface InvokeMap {
   'assistant:set-endpoint': (provider: LlmProviderId, url: string | null) => string | null;
   'assistant:get-context': () => string;
   'assistant:set-context': (context: string) => void;
+  /** Screens and windows with previews, for the source picker. */
+  'video:list-sources': () => VideoSource[];
+  'video:set-source': (source: { id: string; name: string } | null) => void;
+  /** Recording needs a running session. */
+  'video:start': () => void;
+  'video:stop': () => void;
   /** Capture window only: a MediaRecorder chunk of audio.webm. */
   'capture:audio-chunk': (chunk: ArrayBuffer) => void;
+  /** Capture window only: a MediaRecorder chunk of the current video file. */
+  'capture:video-chunk': (chunk: ArrayBuffer) => void;
+  /** Capture window only: the recorded source went away (window closed, display unplugged). */
+  'capture:video-ended': () => void;
 }
 
 /** main → renderer push events. */
@@ -157,7 +201,13 @@ export const INVOKE_CHANNELS = [
   'assistant:set-endpoint',
   'assistant:get-context',
   'assistant:set-context',
+  'video:list-sources',
+  'video:set-source',
+  'video:start',
+  'video:stop',
   'capture:audio-chunk',
+  'capture:video-chunk',
+  'capture:video-ended',
 ] as const satisfies readonly InvokeChannel[];
 
 export const EVENT_CHANNELS = [
@@ -187,8 +237,21 @@ export interface CaptureStartResult {
   recordingStartedAt: number | null;
 }
 
+export interface VideoStartResult {
+  /** User-facing error message, or null on success. */
+  error: string | null;
+  /** Wall-clock ms when the video recorder started. */
+  startedAt: number | null;
+  /** MediaRecorder mime type, e.g. `video/webm;codecs=h264`. */
+  mimeType: string | null;
+}
+
 /** Control API the capture page exposes on `window.captureControl`; main drives it via executeJavaScript. */
 export interface CaptureControl {
   start(options: CaptureStartOptions): Promise<CaptureStartResult>;
+  /** Stops audio and video. */
   stop(): Promise<void>;
+  /** Records the source main's display-media handler picks for a video-only request. */
+  startVideo(options: VideoStartOptions): Promise<VideoStartResult>;
+  stopVideo(): Promise<void>;
 }

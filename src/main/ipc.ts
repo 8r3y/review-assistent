@@ -75,8 +75,21 @@ export function registerIpc(app: AppController): void {
     },
     'assistant:get-context': () => app.getOwnerContext(),
     'assistant:set-context': (_e, text) => app.setOwnerContext(asString(text) ?? ''),
+    'video:list-sources': () => app.listVideoSources(),
+    'video:set-source': (_e, source) => {
+      const id = asString(source?.id);
+      app.setVideoSource(id ? { id, name: asString(source?.name) ?? '' } : null);
+    },
+    'video:start': () => app.startVideo(),
+    'video:stop': () => app.stopVideo(),
     'capture:audio-chunk': (event, chunk) => {
       if (app.isCaptureSender(event.sender) && chunk instanceof ArrayBuffer) app.appendAudioChunk(chunk);
+    },
+    'capture:video-chunk': (event, chunk) => {
+      if (app.isCaptureSender(event.sender) && chunk instanceof ArrayBuffer) app.appendVideoChunk(chunk);
+    },
+    'capture:video-ended': (event) => {
+      if (app.isCaptureSender(event.sender)) void app.onVideoEnded();
     },
   };
 

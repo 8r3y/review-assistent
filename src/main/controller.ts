@@ -8,6 +8,8 @@ import type {
   EventMap,
   OverlayMode,
   SttSettings,
+  VideoSource,
+  VideoStartOptions,
 } from '@shared/ipc';
 import {
   DEFAULT_MODELS,
@@ -19,7 +21,7 @@ import {
 } from '@shared/assistant';
 import type { PipelineToMain } from '@shared/pipeline-protocol';
 import type { Segment } from '@shared/transcript';
-import { CaptureHost, installDisplayMediaHandler } from './capture-host';
+import { CaptureHost, installDisplayMediaHandler, listVideoSources } from './capture-host';
 import { registerHotkeys, unregisterHotkeys } from './hotkeys';
 import { readOwnerContext, writeOwnerContext } from './owner-context';
 import { PipelineHost } from './pipeline-host';
@@ -37,6 +39,13 @@ const OPACITY_STEP = 0.1;
 const PIPELINE_STOP_TIMEOUT_MS = 8000;
 /** Assistant errors (bad key, refusal…) stay visible this long. */
 const ASSISTANT_ERROR_MS = 12_000;
+/** Full HD at 30 fps keeps screen text readable while the encoder stays light. */
+const VIDEO_OPTIONS: VideoStartOptions = {
+  maxWidth: 1920,
+  maxHeight: 1080,
+  maxFrameRate: 30,
+  bitrate: 6_000_000,
+};
 const LLM_SECRETS: Record<LlmProviderId, SecretName> = {
   anthropic: 'anthropicApiKey',
   google: 'googleApiKey',
@@ -59,7 +68,7 @@ export class AppController {
   private assistantErrorTimer: NodeJS.Timeout | null = null;
 
   constructor() {
-    const { overlay, audio, stt, diarization, assistant } = this.settings.get();
+    const { overlay, audio, video, stt, diarization, assistant } = this.settings.get();
     this.store = new AppStore({
       session: { status: 'idle', startedAt: null, dir: null },
       capture: { status: 'idle', error: null },
@@ -72,6 +81,7 @@ export class AppController {
         error: null,
       },
       overlay: { visible: true, mode: overlay.mode, opacity: clampOpacity(overlay.opacity) },
+      video: { ...video, status: 'idle', startedAt: null, error: null },
       assistant: { ...assistant, keys: this.llmKeyFlags(), endpoints: this.llmEndpoints(), error: null },
       questions: this.questions.nav(),
       hotkeys: [],
@@ -98,6 +108,7 @@ export class AppController {
       setOverlayMode: (mode) => this.setOverlayMode(mode),
       setOverlayOpacity: (opacity) => this.setOverlayOpacity(opacity),
       setRecordAudio: (recordAudio) => this.setAudioSettings({ recordAudio }),
+      toggleVideo: () => this.toggleVideo(),
       answerQuestion: () => this.answerQuestion(null),
       openSessionsFolder: () => void shell.openPath(SessionManager.rootDir()),
       openCurrentSessionFolder: () => {
@@ -137,6 +148,79 @@ export class AppController {
     this.session.appendAudio(chunk);
   }
 
+  appendVideoChunk(chunk: ArrayBuffer): void {
+    this.session.appendVideo(chunk);
+  }
+
+  listVideoSources(): Promise<VideoSource[]> {
+    return listVideoSources();
+  }
+
+  setVideoSource(source: { id: string; name: string } | null): void {
+    const video = { sourceId: source?.id ?? null, sourceName: source?.name ?? null };
+    this.settings.update((s) => ({ ...s, video }));
+    this.store.update((s) => ({ ...s, video: { ...s.video, ...video } }));
+  }
+
+  async startVideo(): Promise<void> {
+    const { session, video } = this.store.get();
+    if (video.status !== 'idle') return;
+    if (session.status !== 'running') {
+      this.setVideoState({ error: 'Видео пишется во время сессии — сначала начните сессию' });
+      return;
+    }
+    const source = video.sourceId ? { id: video.sourceId, name: video.sourceName } : null;
+    this.setVideoState({ status: 'starting', error: null });
+    this.session.beginVideo(video.sourceName ?? 'Основной экран');
+    try {
+      const { startedAt, mimeType } = await this.capture.startVideo(source, VIDEO_OPTIONS);
+      if (this.store.get().session.status !== 'running') {
+        // The session is stopping: it closed the video file before the recorder came up.
+        await this.capture.stopVideo();
+        this.setVideoState({ status: 'idle', startedAt: null });
+        return;
+      }
+      this.session.setVideoStarted(startedAt, mimeType);
+      this.setVideoState({ status: 'recording', startedAt });
+    } catch (e) {
+      await this.session.endVideo({ discard: true });
+      this.setVideoState({
+        status: 'idle',
+        startedAt: null,
+        error: e instanceof Error ? e.message : String(e),
+      });
+    }
+  }
+
+  async stopVideo(): Promise<void> {
+    if (this.store.get().video.status !== 'recording') return;
+    this.setVideoState({ status: 'stopping' });
+    await this.capture.stopVideo();
+    await this.session.endVideo();
+    this.setVideoState({ status: 'idle', startedAt: null });
+  }
+
+  toggleVideo(): void {
+    const status = this.store.get().video.status;
+    if (status === 'recording') void this.stopVideo();
+    else if (status === 'idle') void this.startVideo();
+  }
+
+  /** The capture window already stopped the recorder: the source went away. */
+  async onVideoEnded(): Promise<void> {
+    if (this.store.get().video.status !== 'recording') return;
+    await this.session.endVideo();
+    this.setVideoState({
+      status: 'idle',
+      startedAt: null,
+      error: 'Источник видео закрыт — запись остановлена',
+    });
+  }
+
+  private setVideoState(patch: Partial<AppState['video']>): void {
+    this.store.update((s) => ({ ...s, video: { ...s.video, ...patch } }));
+  }
+
   showControl(): void {
     if (this.control.isMinimized()) this.control.restore();
     this.control.show();
@@ -151,6 +235,7 @@ export class AppController {
     this.questions.reset();
     broadcast('transcript:reset');
     this.setAssistantError(null);
+    this.setVideoState({ error: null });
     this.store.update((s) => ({ ...s, questions: this.questions.nav() }));
     this.store.update((s) => ({
       ...s,
@@ -209,11 +294,13 @@ export class AppController {
     const status = this.store.get().session.status;
     if (status === 'idle' || status === 'stopping') return;
     this.store.update((s) => ({ ...s, session: { ...s.session, status: 'stopping' } }));
+    await this.stopVideo();
     await this.capture.stop();
     const stopped = this.pipeline.waitFor('session:stopped', PIPELINE_STOP_TIMEOUT_MS);
     this.pipeline.send({ type: 'session:stop' });
     await stopped;
-    const warning = await this.session.stop();
+    // Muxing the videos with the call audio happens here and can take a few seconds.
+    const warnings = await this.session.stop();
     broadcast('audio:activity', {
       mic: { levelDb: -100, speech: false },
       system: { levelDb: -100, speech: false },
@@ -221,7 +308,8 @@ export class AppController {
     this.store.update((s) => ({
       ...s,
       session: { status: 'idle', startedAt: null, dir: null },
-      capture: { status: 'idle', error: warning },
+      capture: { status: 'idle', error: warnings.join('; ') || null },
+      video: { ...s.video, status: 'idle', startedAt: null },
       stt: { ...s.stt, status: { mic: 'off', system: 'off' } },
     }));
   }
@@ -438,6 +526,7 @@ export class AppController {
         this.setOverlayMode(overlay().mode === 'interactive' ? 'passthrough' : 'interactive'),
       'overlay.opacityDown': () => this.setOverlayOpacity(overlay().opacity - OPACITY_STEP),
       'overlay.opacityUp': () => this.setOverlayOpacity(overlay().opacity + OPACITY_STEP),
+      'video.toggle': () => this.toggleVideo(),
       'question.answer': () => this.answerQuestion(null),
       'question.mark': () => this.markQuestion(),
       'question.prev': () => this.stepQuestion(-1),

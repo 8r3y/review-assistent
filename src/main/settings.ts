@@ -8,13 +8,14 @@ import {
   type LlmRoute,
   type LlmTask,
 } from '@shared/assistant';
-import type { AudioSettings, HotkeyBindings, OverlayMode, SttSettings } from '@shared/ipc';
+import type { AudioSettings, HotkeyBindings, OverlayMode, SttSettings, VideoSettings } from '@shared/ipc';
 import type { DiarizationConfig, GateConfig, VadConfig } from '@shared/pipeline-protocol';
 
 export interface Settings {
   overlay: { bounds: Rectangle | null; opacity: number; mode: OverlayMode };
   hotkeys: HotkeyBindings;
   audio: AudioSettings;
+  video: VideoSettings;
   stt: SttSettings;
   vad: Omit<VadConfig, 'modelPath'>;
   gate: GateConfig;
@@ -46,6 +47,7 @@ const DEFAULTS: Settings = {
   overlay: { bounds: null, opacity: 0.85, mode: 'interactive' },
   hotkeys: DEFAULT_HOTKEYS,
   audio: { micDeviceId: null, recordAudio: true },
+  video: { sourceId: null, sourceName: null },
   stt: { model: 'nova-3', language: 'ru' },
   vad: { onThreshold: 0.5, offThreshold: 0.35, minSpeechMs: 250, minSilenceMs: 600 },
   // Pre-roll must exceed minSpeechMs: the VAD confirms speech that late.
@@ -131,6 +133,7 @@ export class SettingsStore {
           answer: { ...stored.assistantModels?.answer },
         },
         audio: { ...DEFAULTS.audio, ...stored.audio },
+        video: { ...DEFAULTS.video, ...stored.video },
         stt: { ...DEFAULTS.stt, ...stored.stt },
         vad: { ...DEFAULTS.vad, ...stored.vad },
         gate: { ...DEFAULTS.gate, ...stored.gate },

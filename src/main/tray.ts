@@ -9,6 +9,7 @@ export interface TrayActions {
   setOverlayMode: (mode: OverlayMode) => void;
   setOverlayOpacity: (opacity: number) => void;
   setRecordAudio: (record: boolean) => void;
+  toggleVideo: () => void;
   openSessionsFolder: () => void;
   openCurrentSessionFolder: () => void;
   quit: () => void;
@@ -30,8 +31,17 @@ export class TrayController {
   }
 
   update(state: AppState): void {
-    const { session, overlay, audio, capture, stt, hotkeys } = state;
-    const key = JSON.stringify([session, overlay, audio.recordAudio, capture.error, stt.error, hotkeys]);
+    const { session, overlay, audio, video, capture, stt, hotkeys } = state;
+    const key = JSON.stringify([
+      session,
+      overlay,
+      audio.recordAudio,
+      video.status,
+      video.sourceName,
+      capture.error,
+      stt.error,
+      hotkeys,
+    ]);
     if (key === this.lastKey) return;
     this.lastKey = key;
 
@@ -49,6 +59,7 @@ export class TrayController {
     session,
     overlay,
     audio,
+    video,
     capture,
     stt,
     hotkeys,
@@ -79,6 +90,15 @@ export class TrayController {
         enabled: running,
         ...shortcut('question.answer'),
         click: a.answerQuestion,
+      },
+      {
+        label:
+          video.status === 'recording'
+            ? 'Остановить видеозапись'
+            : `Записывать видео: ${truncate(video.sourceName ?? 'основной экран', 40)}`,
+        enabled: running && (video.status === 'idle' || video.status === 'recording'),
+        ...shortcut('video.toggle'),
+        click: a.toggleVideo,
       },
       {
         label: 'Записывать аудио',
