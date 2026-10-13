@@ -22,6 +22,8 @@ export interface SttStreamOptions {
   sampleRate: number;
   language: string;
   model: string;
+  /** Terms to prompt the model with. */
+  keyterms: string[];
   diarize: boolean;
   onResult: (result: SttResult) => void;
   onStatus: (status: SttStatus, error: string | null) => void;

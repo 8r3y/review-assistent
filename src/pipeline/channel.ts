@@ -36,6 +36,7 @@ export interface ChannelOptions {
   stt: SttProvider | null;
   sttModel: string;
   sttLanguage: string;
+  sttKeyterms: string[];
   /** Ask the STT provider for diarization (when local diarization is unavailable). */
   sttDiarize: boolean;
   toIso: (sessionMs: number) => string;
@@ -66,6 +67,7 @@ export class ChannelProcessor {
         sampleRate: PCM_SAMPLE_RATE,
         model: options.sttModel,
         language: options.sttLanguage,
+        keyterms: options.sttKeyterms,
         diarize: options.sttDiarize,
         onResult: (result) => {
           const out = this.assembler.push(result);

@@ -32,6 +32,8 @@ export class SessionManager {
   /** Session ms at which audio.webm starts (the recorder starts after the session clock). */
   private audioOffsetMs: number | null = null;
   private videos: VideoRecording[] = [];
+  /** Screenshot files with the session ms they were taken at. */
+  private screenshots: { file: string; atMs: number }[] = [];
   private videoStream: WriteStream | null = null;
 
   /** Folder that holds all session folders (created on demand). */
@@ -59,6 +61,7 @@ export class SessionManager {
     this.segments = [];
     this.audioOffsetMs = null;
     this.videos = [];
+    this.screenshots = [];
     this.audio = options.recordAudio ? createWriteStream(join(dir, 'audio.webm')) : null;
     this.writeMeta();
     return this.current;
@@ -84,6 +87,16 @@ export class SessionManager {
 
   appendAudio(chunk: ArrayBuffer): void {
     this.audio?.write(Buffer.from(chunk));
+  }
+
+  /** @returns the file name in the session folder, or null without a session. */
+  saveScreenshot(png: Buffer): string | null {
+    if (!this.current) return null;
+    const file = `screenshot-${String(this.screenshots.length + 1).padStart(2, '0')}.png`;
+    writeFileSync(join(this.current.dir, file), png);
+    this.screenshots.push({ file, atMs: this.current.clock.now() });
+    this.writeMeta();
+    return file;
   }
 
   /** Opens the next video file; chunks go to it until endVideo(). */
@@ -186,6 +199,7 @@ export class SessionManager {
         startMs,
         endMs,
       })),
+      screenshots: this.screenshots,
       files: { transcript: 'transcript.jsonl', audio: 'audio.webm (L = mic, R = system)' },
     };
     writeFileSync(join(dir, 'session.json'), JSON.stringify(meta, null, 2));

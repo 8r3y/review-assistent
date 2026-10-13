@@ -32,13 +32,17 @@ export interface Answer {
  */
 export interface Question {
   id: string;
-  /** Wording the LLM made of the source phrases. */
+  /** Wording the LLM made of the source phrases; until it succeeds, the phrases themselves. */
   text: string;
+  /** The LLM worded the question; false → `text` is the raw phrases (or a placeholder). */
+  worded: boolean;
   askedBy: SpeakerId;
   tStart: number;
   tEnd: number;
-  /** Remote transcript segments the question was made of. */
+  /** Transcript segments the question was made of: the participants' and the owner's clarifications. */
   sourceSegmentIds: string[];
+  /** Screenshot files in the session folder, oldest first; sent with the answer request. */
+  screenshots: string[];
   status: QuestionStatus;
   answer: Answer | null;
   /** Session ms of the last change. */
@@ -92,18 +96,3 @@ export const DEFAULT_TRIGGER_PHRASES = [
   'great question',
   'let me think',
 ];
-
-/** Splits the comma-separated list typed in settings into trimmed phrases, without empty ones and repeats. */
-export function parseTriggerPhrases(text: string): string[] {
-  const phrases = text
-    .split(',')
-    .map((p) => p.trim().replace(/\s+/g, ' '))
-    .filter((p) => /[\p{L}\p{N}]/u.test(p));
-  const seen = new Set<string>();
-  return phrases.filter((p) => {
-    const key = p.toLowerCase().replace(/ё/g, 'е');
-    if (seen.has(key)) return false;
-    seen.add(key);
-    return true;
-  });
-}

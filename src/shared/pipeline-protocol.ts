@@ -34,6 +34,7 @@ export interface SttConfig {
   apiKey: string | null;
   model: string;
   language: string;
+  keyterms: string[];
 }
 
 export interface AssistantConfig {
@@ -70,6 +71,8 @@ export type MainToPipeline =
   /** Makes a question of the remote phrases said since the previous mark and answers it. */
   | { type: 'assistant:mark-question' }
   | { type: 'assistant:set-triggers'; phrases: string[] }
+  /** Extends the last question (or marks a new one) and answers it with this screenshot. */
+  | { type: 'assistant:screenshot'; file: string; png: string }
   | { type: 'assistant:dismiss'; questionId: string }
   /** Carries the capture → pipeline MessagePort in `ports[0]`. */
   | { type: 'audio-port' };

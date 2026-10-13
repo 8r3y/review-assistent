@@ -5,10 +5,12 @@ import { QuestionsView } from './questions-view';
 const q = (id: string, status: QuestionStatus = 'open'): Question => ({
   id,
   text: id,
+  worded: true,
   askedBy: 'S1',
   tStart: 0,
   tEnd: 0,
   sourceSegmentIds: [],
+  screenshots: [],
   status,
   answer: null,
   updatedAt: 0,

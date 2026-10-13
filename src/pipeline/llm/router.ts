@@ -40,8 +40,8 @@ export function createLlm(config: AssistantConfig): LlmSetup {
   return {
     provider: {
       analyze: (message, signal) => analyze.analyze(message, settings.analyze, signal),
-      streamAnswer: (message, onText, signal) =>
-        answer.streamAnswer(message, settings.answer, onText, signal),
+      streamAnswer: (request, onText, signal) =>
+        answer.streamAnswer(request, settings.answer, onText, signal),
     },
     unavailable: null,
   };

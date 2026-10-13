@@ -58,22 +58,35 @@ export async function listVideoSources(): Promise<VideoSource[]> {
     }));
 }
 
+/** Screenshots are scaled down to fit this box (the model downsizes larger images anyway). */
+const SCREENSHOT_SIZE = { width: 1920, height: 1200 };
+
+/**
+ * Captures the screen or window picked for video (null → the primary screen) as PNG.
+ * Rejects with a user-facing message.
+ */
+export async function captureScreenshot(source: { id: string; name: string | null } | null): Promise<Buffer> {
+  const found = await findVideoSource(source, SCREENSHOT_SIZE);
+  if (!found) throw new Error('Источник для скриншота не найден — выберите экран или окно заново');
+  if (found.thumbnail.isEmpty()) throw new Error('Не удалось снять источник — окно свёрнуто?');
+  return found.thumbnail.toPNG();
+}
+
 /**
  * Finds the source by id; a window that was reopened has a new id, so it is matched by title.
- * null → the primary screen.
+ * null → the primary screen. Every candidate's thumbnail is captured at `thumbnailSize`.
  */
 async function findVideoSource(
   wanted: { id: string; name: string | null } | null,
+  thumbnailSize = NO_THUMBNAIL,
 ): Promise<DesktopCapturerSource | null> {
-  const sources = await desktopCapturer.getSources({
-    types: ['screen', 'window'],
-    thumbnailSize: NO_THUMBNAIL,
-  });
-  if (!wanted) return sources.find((s) => s.id.startsWith('screen:')) ?? null;
-  const kind = wanted.id.split(':')[0];
+  // Only sources of the wanted kind: full-size thumbnails of every window would be slow.
+  const kind = wanted?.id.startsWith('window:') ? 'window' : 'screen';
+  const sources = await desktopCapturer.getSources({ types: [kind], thumbnailSize });
+  if (!wanted) return sources[0] ?? null;
   return (
     sources.find((s) => s.id === wanted.id) ??
-    sources.find((s) => s.name === wanted.name && s.id.split(':')[0] === kind && !isOwnWindow(s.id)) ??
+    sources.find((s) => s.name === wanted.name && !isOwnWindow(s.id)) ??
     null
   );
 }

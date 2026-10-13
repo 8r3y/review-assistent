@@ -1,7 +1,7 @@
 import type { Question, Turn } from '@shared/assistant';
 import type { PipelineToMain } from '@shared/pipeline-protocol';
 import { OWNER, type Segment, type SpeakerId } from '@shared/transcript';
-import { LlmError, type AnalysisResult, type LlmProvider } from '../llm/provider';
+import { LlmError, type AnalysisResult, type AnswerImage, type LlmProvider } from '../llm/provider';
 import { buildTurns } from '../transcript/turns';
 import { TurnAnalyzer } from './analyzer';
 import { needsSummary } from './prefilter';
@@ -12,12 +12,17 @@ import { TriggerMatcher } from './triggers';
 /** Context window of turns sent with each request. */
 const ANALYZE_CONTEXT_MS = 180_000;
 const ANSWER_CONTEXT_MS = 300_000;
-/** A question takes remote phrases since the previous mark, but never older than this. */
-const MARK_WINDOW_MS = 120_000;
+/** Shown when a mark could not word its question: it is kept with the raw phrases. */
+const NOT_WORDED_HINT =
+  'Вопрос не определён — добавьте скриншот (Ctrl+Alt+P) или уточните и нажмите Ctrl+Alt+A';
+/** Raw phrases shown in place of a question that could not be worded. */
+const RAW_TEXT_MAX = 300;
 /** On a mark, a remote phrase still being recognized is awaited this long at most. */
 const SETTLE_MAX_MS = 1500;
 const SETTLE_POLL_MS = 100;
 const ANSWER_UPDATE_MS = 120;
+/** Only the latest screenshots of a question go to the model. */
+const MAX_ANSWER_IMAGES = 3;
 const TICK_MS = 500;
 
 export interface EngineDeps {
@@ -49,6 +54,8 @@ export class AssistantEngine {
   private readonly store = new QuestionStore();
   private readonly analyzer: TurnAnalyzer | null;
   private readonly answering = new Map<string, AbortController>();
+  /** Screenshots per question, sent with its answer requests. */
+  private readonly images = new Map<string, AnswerImage[]>();
   private readonly timer: NodeJS.Timeout;
   /** Session ms of the last mark: remote phrases starting from here belong to the next question. */
   private boundary = 0;
@@ -111,33 +118,44 @@ export class AssistantEngine {
   }
 
   /**
-   * Makes a question of the remote phrases said since the previous mark and answers it.
-   * @param at session ms of the mark (default: now); `quiet` skips the error when there is nothing new.
+   * Makes a question of the phrases of both sides said since the previous mark (or the session start)
+   * and answers it. A question the LLM could not word is still made, from the raw phrases, so a
+   * screenshot or a clarification can be added to it; it is answered only then.
+   * @param at session ms of the mark (default: now); `quiet` (a trigger phrase) skips the error when
+   * nothing was said.
    */
   mark(at = this.deps.now(), { quiet = false } = {}): Promise<void> {
-    return this.serial((provider) => this.makeQuestion(provider, at, quiet));
+    return this.serial(async (provider) => {
+      const question = await this.makeQuestion(provider, at, { quiet, allowEmpty: false });
+      if (question?.worded) void this.answer(question.id);
+    });
   }
 
   /**
-   * Adds the remote phrases said since the last mark to the last question and answers it again;
-   * without a last question, marks a new one.
+   * Adds the phrases said since the last mark to the last question, words it again if needed and
+   * answers it; without a last question, marks a new one.
    */
   extend(): Promise<void> {
     const at = this.deps.now();
     return this.serial(async (provider) => {
-      const last = this.last && this.store.get(this.last.id);
-      if (!this.last || !last || last.status === 'dismissed') return this.makeQuestion(provider, at, false);
-      const { from } = this.last;
-      await this.settle(at);
-      if (this.remotePhrases(this.boundary, at).length > 0) {
-        const phrases = this.remotePhrases(from, at);
-        const text = await this.wordQuestion(provider, phrases, from, at, last.text);
-        if (!text || this.stopped) return;
-        this.boundary = at;
-        const question = this.store.extend(last.id, text, phrases, this.deps.now());
-        if (question) this.publish(question, true);
-      }
-      void this.answer(last.id);
+      const question = await this.extendOrMake(provider, at, false);
+      if (question) void this.answer(question.id);
+    });
+  }
+
+  /** Like extend(), and the screenshot goes with the question to the answer. */
+  attachScreenshot(file: string, png: string): Promise<void> {
+    const at = this.deps.now();
+    return this.serial(async (provider) => {
+      const question = await this.extendOrMake(provider, at, true);
+      if (!question || this.stopped) return;
+      this.images.set(question.id, [
+        ...(this.images.get(question.id) ?? []),
+        { mediaType: 'image/png', data: png },
+      ]);
+      const updated = this.store.addScreenshot(question.id, file, this.deps.now());
+      if (updated) this.publish(updated, true);
+      void this.answer(question.id);
     });
   }
 
@@ -159,15 +177,17 @@ export class AssistantEngine {
     publish(false);
 
     try {
+      const images = (this.images.get(question.id) ?? []).slice(-MAX_ANSWER_IMAGES);
       const message = buildAnswerMessage({
         question,
+        screenshots: images.length,
         phrases: question.sourceSegmentIds
           .map((id) => this.segments.get(id))
           .filter((s): s is Segment => s !== undefined),
         turns: this.recentTurns(ANSWER_CONTEXT_MS),
       });
       text = await provider.streamAnswer(
-        message,
+        { text: message, images },
         (delta) => {
           text += delta;
           if (Date.now() - lastSent >= ANSWER_UPDATE_MS) {
@@ -218,21 +238,63 @@ export class AssistantEngine {
     return run;
   }
 
-  private async makeQuestion(provider: LlmProvider, at: number, quiet: boolean): Promise<void> {
+  /**
+   * @param allowEmpty with nothing said since the mark, make a placeholder question (for a screenshot)
+   * @returns the new question, or null when nothing was said since the previous mark.
+   */
+  private async makeQuestion(
+    provider: LlmProvider,
+    at: number,
+    { quiet, allowEmpty }: { quiet: boolean; allowEmpty: boolean },
+  ): Promise<Question | null> {
     await this.settle(at);
-    const from = Math.max(this.boundary, at - MARK_WINDOW_MS);
-    const phrases = this.remotePhrases(from, at);
-    if (phrases.length === 0) {
-      if (!quiet) this.error('После прошлого вопроса собеседник ничего не сказал');
-      return;
+    const from = this.boundary;
+    const phrases = this.phrasesBetween(from, at);
+    let wording: string | null = null;
+    if (phrases.length > 0) {
+      wording = await this.wordQuestion(provider, phrases, from, null);
+    } else if (!allowEmpty) {
+      if (!quiet) this.error('После прошлого вопроса никто ничего не сказал');
+      return null;
     }
-    const text = await this.wordQuestion(provider, phrases, from, at, null);
-    if (!text || this.stopped) return;
+    if (this.stopped) return null;
     this.boundary = at;
-    const question = this.store.create(text, phrases, this.deps.now());
+    const text = wording ?? (phrases.length > 0 ? rawText(phrases) : 'Вопрос по скриншоту');
+    const question = this.store.create(text, wording !== null, phrases, at, this.deps.now());
     this.last = { id: question.id, from };
     this.publish(question, true);
-    void this.answer(question.id);
+    return question;
+  }
+
+  /**
+   * Takes the phrases said since the last mark into the last question and words it again (also when
+   * an earlier wording failed); without a last question, makes a new one.
+   * @returns the question, or null when there was nothing to make a new one of.
+   */
+  private async extendOrMake(
+    provider: LlmProvider,
+    at: number,
+    allowEmpty: boolean,
+  ): Promise<Question | null> {
+    const last = this.last && this.store.get(this.last.id);
+    if (!this.last || !last || last.status === 'dismissed') {
+      return this.makeQuestion(provider, at, { quiet: false, allowEmpty });
+    }
+    const { from } = this.last;
+    await this.settle(at);
+    // New phrases of either side: the owner's own clarification («I mean on Go») counts too.
+    const added = this.phrasesBetween(this.boundary, at);
+    if (added.length === 0 && last.worded) return last;
+    const phrases = this.phrasesBetween(from, at);
+    if (phrases.length === 0) return last;
+    const wording = await this.wordQuestion(provider, phrases, from, last.worded ? last.text : null);
+    if (this.stopped) return null;
+    if (added.length > 0) this.boundary = at;
+    const worded = wording !== null || last.worded;
+    const text = wording ?? (last.worded ? last.text : rawText(phrases));
+    const question = this.store.extend(last.id, text, worded, phrases, this.deps.now());
+    if (question) this.publish(question, true);
+    return question;
   }
 
   /** Waits (briefly) for a remote phrase that started before the mark to be recognized. */
@@ -243,31 +305,31 @@ export class AssistantEngine {
     }
   }
 
-  /** Remote phrases that started within [from, to), oldest first. */
-  private remotePhrases(from: number, to: number): Segment[] {
+  /**
+   * Phrases of both sides that started within [from, to), oldest first. The owner's ones carry their
+   * clarifying questions and corrections; the phrase with the trigger starts at `to` and is left out.
+   */
+  private phrasesBetween(from: number, to: number): Segment[] {
     return [...this.segments.values()]
-      .filter((s) => s.speaker !== OWNER && s.tStart >= from && s.tStart < to)
+      .filter((s) => s.tStart >= from && s.tStart < to)
       .sort((a, b) => a.tStart - b.tStart);
   }
 
+  /** @returns the wording, or null (with an error shown) when the LLM found no question or failed. */
   private async wordQuestion(
     provider: LlmProvider,
     phrases: Segment[],
     from: number,
-    at: number,
     previousWording: string | null,
   ): Promise<string | null> {
-    // Earlier turns, plus the owner's own words in between (e.g. «you mean X?»); the phrases go separately.
-    const context = this.turns.filter(
-      (t) => t.tEnd >= from - ANALYZE_CONTEXT_MS && t.tStart < at && (t.speaker === OWNER || t.tStart < from),
-    );
+    const context = this.turns.filter((t) => t.tStart < from && t.tEnd >= from - ANALYZE_CONTEXT_MS);
     try {
       const result = await provider.analyze(buildQuestionMessage({ phrases, context, previousWording }));
       const text = result.question?.trim();
       if (text) return text;
-      this.error('Не удалось сформулировать вопрос');
+      this.error(NOT_WORDED_HINT);
     } catch (e) {
-      this.reportError(e);
+      this.error(`${describe(e)}. ${NOT_WORDED_HINT}`);
     }
     return null;
   }
@@ -355,4 +417,10 @@ export class AssistantEngine {
 function describe(e: unknown): string {
   if (e instanceof LlmError) return e.message;
   return `Ошибка ассистента: ${e instanceof Error ? e.message : String(e)}`;
+}
+
+/** The phrases themselves, latest kept, in place of a question that could not be worded. */
+function rawText(phrases: Segment[]): string {
+  const text = phrases.map((s) => s.text.trim()).join(' ');
+  return text.length > RAW_TEXT_MAX ? `…${text.slice(-RAW_TEXT_MAX)}` : text;
 }

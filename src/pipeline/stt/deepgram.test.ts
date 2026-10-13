@@ -4,8 +4,15 @@ import { buildDeepgramUrl, parseDeepgramResults, type DeepgramResults } from './
 describe('buildDeepgramUrl', () => {
   it('requests raw 16 kHz PCM with interim results and optional diarization', () => {
     const url = new URL(
-      buildDeepgramUrl({ sampleRate: 16000, language: 'ru', model: 'nova-3', diarize: true }),
+      buildDeepgramUrl({
+        sampleRate: 16000,
+        language: 'ru',
+        model: 'nova-3',
+        keyterms: ['Kafka', 'RabbitMQ'],
+        diarize: true,
+      }),
     );
+    expect(url.searchParams.getAll('keyterm')).toEqual(['Kafka', 'RabbitMQ']);
     expect(url.searchParams.get('encoding')).toBe('linear16');
     expect(url.searchParams.get('sample_rate')).toBe('16000');
     expect(url.searchParams.get('interim_results')).toBe('true');

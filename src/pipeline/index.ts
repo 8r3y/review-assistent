@@ -43,6 +43,9 @@ parent.on('message', ({ data, ports }: { data: MainToPipeline; ports: MessagePor
     case 'assistant:set-triggers':
       session?.setTriggerPhrases(data.phrases);
       break;
+    case 'assistant:screenshot':
+      session?.attachScreenshot(data.file, data.png);
+      break;
     case 'assistant:dismiss':
       session?.dismissQuestion(data.questionId);
       break;

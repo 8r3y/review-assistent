@@ -33,9 +33,10 @@ export type HotkeyAction =
   | 'overlay.toggleMode'
   | 'overlay.opacityDown'
   | 'overlay.opacityUp'
+  | 'overlay.scrollUp'
+  | 'overlay.scrollDown'
   | 'video.toggle'
   | 'screenshot'
-  | 'marker'
   | 'question.answer'
   | 'question.mark'
   | 'question.prev'
@@ -62,7 +63,12 @@ export interface AudioSettings {
 export interface SttSettings {
   model: string;
   language: string;
+  /** Terms the model should hear (Deepgram keyterm prompting), e.g. English tech words in Russian speech. */
+  keyterms: string[];
 }
+
+/** More terms dilute the prompting: on a test call 80 terms recognized worse than none. */
+export const MAX_STT_KEYTERMS = 50;
 
 export interface DiarizationSettings {
   /** Voice similarity needed to treat two phrases as one speaker (0…1); higher splits more speakers. */
@@ -117,6 +123,9 @@ export interface VideoStartOptions {
 /** Height of the overlay's top handle bar, px. In passthrough mode the overlay accepts mouse input only there. */
 export const OVERLAY_HANDLE_HEIGHT = 28;
 
+/** Width of the overlay's scrollbar, px. In passthrough mode the overlay also accepts mouse input over it. */
+export const OVERLAY_SCROLLBAR_WIDTH = 14;
+
 /** renderer → main request/response channels. */
 export interface InvokeMap {
   'app:get-state': () => AppState;
@@ -126,7 +135,9 @@ export interface InvokeMap {
   'overlay:set-mode': (mode: OverlayMode) => void;
   'overlay:set-opacity': (opacity: number) => void;
   'audio:set-settings': (patch: Partial<AudioSettings>) => void;
-  'stt:set-settings': (patch: Partial<SttSettings>) => void;
+  'stt:set-settings': (patch: Partial<Omit<SttSettings, 'keyterms'>>) => void;
+  /** Comma-separated terms, checked with Deepgram first. Resolves with an error (nothing saved) or null. */
+  'stt:set-keyterms': (text: string) => string | null;
   /** Applies to the running session too. */
   'diarization:set-settings': (patch: Partial<DiarizationSettings>) => void;
   /** null removes the stored key. */
@@ -156,6 +167,8 @@ export interface InvokeMap {
   /** Recording needs a running session. */
   'video:start': () => void;
   'video:stop': () => void;
+  /** Screenshot of the picked source into the last question, which is answered again. */
+  'screenshot:take': () => void;
   /** Capture window only: a MediaRecorder chunk of audio.webm. */
   'capture:audio-chunk': (chunk: ArrayBuffer) => void;
   /** Capture window only: a MediaRecorder chunk of the current video file. */
@@ -177,6 +190,8 @@ export interface EventMap {
   'transcript:reset': () => void;
   'turns:changed': (upserts: Turn[], removed: string[]) => void;
   'questions:changed': (question: Question) => void;
+  /** Scroll the overlay by a page: -1 up, +1 down. */
+  'overlay:scroll': (direction: -1 | 1) => void;
 }
 
 export type InvokeChannel = keyof InvokeMap;
@@ -191,6 +206,7 @@ export const INVOKE_CHANNELS = [
   'overlay:set-opacity',
   'audio:set-settings',
   'stt:set-settings',
+  'stt:set-keyterms',
   'diarization:set-settings',
   'stt:set-key',
   'transcript:get',
@@ -210,6 +226,7 @@ export const INVOKE_CHANNELS = [
   'video:set-source',
   'video:start',
   'video:stop',
+  'screenshot:take',
   'capture:audio-chunk',
   'capture:video-chunk',
   'capture:video-ended',
@@ -225,6 +242,7 @@ export const EVENT_CHANNELS = [
   'transcript:reset',
   'turns:changed',
   'questions:changed',
+  'overlay:scroll',
 ] as const satisfies readonly EventChannel[];
 
 export interface RendererApi {

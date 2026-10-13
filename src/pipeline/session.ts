@@ -78,6 +78,10 @@ export class PipelineSession {
     void this.assistant.mark();
   }
 
+  attachScreenshot(file: string, png: string): void {
+    void this.assistant.attachScreenshot(file, png);
+  }
+
   setTriggerPhrases(phrases: string[]): void {
     this.assistant.setTriggerPhrases(phrases);
   }
@@ -145,6 +149,7 @@ export class PipelineSession {
       stt: this.stt,
       sttModel: this.config.stt.model,
       sttLanguage: this.config.stt.language,
+      sttKeyterms: this.config.stt.keyterms,
       sttDiarize: isSystem && !this.embedder,
       toIso: (ms) => this.clock.toIso(ms),
       callbacks: {

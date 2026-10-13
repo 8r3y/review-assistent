@@ -1,5 +1,5 @@
 /**
- * Session clock: one monotonic time base for every channel, recorder and marker.
+ * Session clock: one monotonic time base for every channel, recorder and question mark.
  * Session time is milliseconds since session start; wall-clock is derived from it.
  */
 export class SessionClock {

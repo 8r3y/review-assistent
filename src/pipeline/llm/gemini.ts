@@ -8,7 +8,7 @@ import {
 import type { Effort, LlmRoute } from '@shared/assistant';
 import { ANALYZE_SYSTEM, ANSWER_SYSTEM, ownerContextBlock } from '../assistant/prompts';
 import { ANALYSIS_JSON_SCHEMA, AnalysisSchema } from './analysis-schema';
-import { LlmError, type AnalysisResult, type LlmBackend } from './provider';
+import { LlmError, type AnalysisResult, type AnswerRequest, type LlmBackend } from './provider';
 import { isNetworkError, retryingFetch } from './retry-fetch';
 
 const RETRY = { attempts: 3, initialDelay: 0.5, maxDelay: 4 };
@@ -69,7 +69,7 @@ export class GeminiBackend implements LlmBackend {
   }
 
   async streamAnswer(
-    message: string,
+    request: AnswerRequest,
     route: LlmRoute,
     onText: (delta: string) => void,
     signal?: AbortSignal,
@@ -77,7 +77,17 @@ export class GeminiBackend implements LlmBackend {
     return this.call(async () => {
       const stream = await this.ai.models.generateContentStream({
         model: route.model,
-        contents: [{ role: 'user', parts: [{ text: message }] }],
+        contents: [
+          {
+            role: 'user',
+            parts: [
+              ...request.images.map((image) => ({
+                inlineData: { mimeType: image.mediaType, data: image.data },
+              })),
+              { text: request.text },
+            ],
+          },
+        ],
         config: {
           systemInstruction: this.answerSystem,
           thinkingConfig: { thinkingLevel: THINKING[route.effort] },

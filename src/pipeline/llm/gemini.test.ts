@@ -68,7 +68,9 @@ describe('GeminiBackend', () => {
     }
     const { backend: b, calls } = backend({ generateContentStream: async () => chunks() });
     const deltas: string[] = [];
-    await expect(b.streamAnswer('Q', route, (d) => deltas.push(d))).resolves.toBe('Коротко: да.');
+    await expect(b.streamAnswer({ text: 'Q', images: [] }, route, (d) => deltas.push(d))).resolves.toBe(
+      'Коротко: да.',
+    );
     expect(deltas).toEqual(['Коротко: ', 'да.']);
     const system = (calls[0] as { config: { systemInstruction: string } }).config.systemInstruction;
     expect(system).toContain('Я backend-разработчик');

@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import type { Question } from '@shared/assistant';
 import type { PipelineToMain } from '@shared/pipeline-protocol';
 import type { Segment } from '@shared/transcript';
-import type { AnalysisResult, LlmProvider } from '../llm/provider';
+import type { AnalysisResult, AnswerRequest, LlmProvider } from '../llm/provider';
 import { AssistantEngine } from './engine';
 
 const seg = (id: string, speaker: string, text: string, tStart: number, tEnd: number): Segment => ({
@@ -26,10 +26,12 @@ afterEach(() => engine?.stop());
 function setup(summaries: AnalysisResult['summaries'] = []): {
   sent: PipelineToMain[];
   calls: Record<string, unknown>[];
+  answers: AnswerRequest[];
   setNow: (t: number) => void;
 } {
   const sent: PipelineToMain[] = [];
   const calls: Record<string, unknown>[] = [];
+  const answers: AnswerRequest[] = [];
   let now = 0;
   const provider: LlmProvider = {
     analyze: async (m) => {
@@ -37,10 +39,16 @@ function setup(summaries: AnalysisResult['summaries'] = []): {
       calls.push(request);
       return {
         summaries: request.phrases ? [] : summaries,
-        question: request.phrases ? request.phrases.map((p) => p.text).join(' ') : null,
+        // «без вопроса» stands for speech the model finds no question in.
+        question:
+          request.phrases
+            ?.map((p) => p.text)
+            .join(' ')
+            .replace(/.*без вопроса$/, '') || null,
       };
     },
-    streamAnswer: async (_m, onText) => {
+    streamAnswer: async (request, onText) => {
+      answers.push(request);
       onText('Ответ.');
       return 'Ответ.';
     },
@@ -53,7 +61,7 @@ function setup(summaries: AnalysisResult['summaries'] = []): {
     unavailable: null,
     triggerPhrases: ['хороший вопрос'],
   });
-  return { sent, calls, setNow: (t) => (now = t) };
+  return { sent, calls, answers, setNow: (t) => (now = t) };
 }
 
 /** Latest state of every question, in order of creation. */
@@ -139,7 +147,7 @@ describe('AssistantEngine', () => {
     await engine!.mark();
     expect(sent.at(-1)).toEqual({
       type: 'assistant-error',
-      message: 'После прошлого вопроса собеседник ничего не сказал',
+      message: 'После прошлого вопроса никто ничего не сказал',
     });
   });
 
@@ -161,6 +169,119 @@ describe('AssistantEngine', () => {
     await flush();
     expect(calls).toHaveLength(1);
     expect(sent.some((m) => m.type === 'assistant-error')).toBe(false);
+  });
+
+  it("the owner's clarifications go into the question; the trigger phrase does not", async () => {
+    const { sent, calls, answers, setNow } = setup();
+    engine!.addSegment(seg('s1', 'S1', 'Как бы ты сделал кэш?', 0, 2000));
+    engine!.addSegment(seg('o1', 'owner', 'Для API или для базы?', 2500, 3500));
+    engine!.addSegment(seg('s2', 'S1', 'Для API', 4000, 4500));
+    engine!.addSegment(seg('o2', 'owner', 'Хороший вопрос, давайте подумаем', 5000, 6500));
+    setNow(7000);
+    engine!.ownerSpeech('Хороший вопрос, давайте подумаем', 5000);
+    await flush();
+    expect(
+      (calls[0]!.phrases as { speaker: string; text: string }[]).map((p) => [p.speaker, p.text]),
+    ).toEqual([
+      ['S1', 'Как бы ты сделал кэш?'],
+      ['owner', 'Для API или для базы?'],
+      ['S1', 'Для API'],
+    ]);
+    expect(questions(sent)[0]).toMatchObject({ askedBy: 'S1', sourceSegmentIds: ['s1', 'o1', 's2'] });
+    expect(answers[0]!.text).toContain('- owner: Для API или для базы?');
+
+    // Only the owner spoke since the mark: their correction still extends the question.
+    engine!.addSegment(seg('o3', 'owner', 'Уточню: речь про REST', 8000, 9000));
+    setNow(10_000);
+    await engine!.extend();
+    expect(phrasesOf(calls.at(-1)!)).toContain('Уточню: речь про REST');
+  });
+
+  it('takes the owner-only phrases since the session start, by a trigger phrase too', async () => {
+    const { sent, calls, answers, setNow } = setup();
+    engine!.addSegment(seg('o1', 'owner', 'Открываем карту.', 0, 1000));
+    engine!.addSegment(seg('o2', 'owner', 'Слева условия задачи, справа решение.', 300_000, 302_000));
+    setNow(303_000);
+    engine!.ownerSpeech('Хороший вопрос', 302_500);
+    await flush();
+    expect(phrasesOf(calls[0]!)).toEqual(['Открываем карту.', 'Слева условия задачи, справа решение.']);
+    expect(questions(sent)).toEqual([
+      expect.objectContaining({ askedBy: 'owner', worded: true, status: 'answered' }),
+    ]);
+    expect(answers).toHaveLength(1);
+  });
+
+  it('keeps a question it could not word, unanswered until a screenshot or a clarification', async () => {
+    const { sent, calls, answers, setNow } = setup();
+    engine!.addSegment(seg('o1', 'owner', 'Тут без вопроса', 0, 1000));
+    setNow(2000);
+    await engine!.mark();
+    await flush();
+    expect(questions(sent)).toEqual([
+      expect.objectContaining({ id: 'q1', worded: false, text: 'Тут без вопроса', status: 'open' }),
+    ]);
+    expect(answers).toHaveLength(0);
+    expect(
+      sent.some((m) => m.type === 'assistant-error' && m.message.startsWith('Вопрос не определён')),
+    ).toBe(true);
+
+    // A screenshot attaches to it (wording is retried) and the answer goes with the image.
+    setNow(3000);
+    await engine!.attachScreenshot('screenshot-01.png', 'UE5H');
+    await flush();
+    expect(calls).toHaveLength(2);
+    expect(answers.map((a) => a.images.length)).toEqual([1]);
+    expect(answers[0]!.text).toContain('Question: not worded');
+
+    // A clarification words it.
+    engine!.addSegment(seg('s1', 'S1', 'Найдите баг в функции', 4000, 5000));
+    setNow(6000);
+    await engine!.extend();
+    await flush();
+    expect(questions(sent)[0]).toMatchObject({
+      worded: true,
+      askedBy: 'S1',
+      screenshots: ['screenshot-01.png'],
+    });
+  });
+
+  it('a screenshot with nothing said makes a question of its own', async () => {
+    const { sent, answers, setNow } = setup();
+    setNow(1000);
+    await engine!.attachScreenshot('screenshot-01.png', 'UE5H');
+    await flush();
+    expect(questions(sent)).toEqual([
+      expect.objectContaining({
+        text: 'Вопрос по скриншоту',
+        worded: false,
+        askedBy: 'owner',
+        status: 'answered',
+      }),
+    ]);
+    expect(answers[0]!.images).toHaveLength(1);
+  });
+
+  it('a screenshot extends the last question and goes with the answer request', async () => {
+    const { sent, calls, answers, setNow } = setup();
+    engine!.addSegment(seg('s1', 'S1', 'Посмотрите на код', 0, 2000));
+    setNow(3000);
+    await engine!.mark();
+    engine!.addSegment(seg('s2', 'S1', 'Что тут не так?', 4000, 5000));
+    setNow(6000);
+    await engine!.attachScreenshot('screenshot-01.png', 'UE5H');
+    await flush();
+
+    expect(phrasesOf(calls.at(-1)!)).toEqual(['Посмотрите на код', 'Что тут не так?']);
+    expect(questions(sent)).toEqual([
+      expect.objectContaining({
+        id: 'q1',
+        screenshots: ['screenshot-01.png'],
+        sourceSegmentIds: ['s1', 's2'],
+      }),
+    ]);
+    expect(answers.map((a) => a.images.length)).toEqual([0, 1]);
+    expect(answers.at(-1)!.images[0]).toEqual({ mediaType: 'image/png', data: 'UE5H' });
+    expect(answers.at(-1)!.text).toContain('Screenshots of the owner');
   });
 
   it('reports a missing key instead of failing', async () => {

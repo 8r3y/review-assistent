@@ -1,19 +1,19 @@
 import { BrowserWindow, MessageChannelMain, app, shell } from 'electron';
 import { join } from 'node:path';
-import type {
-  AppState,
-  AudioSettings,
-  DiarizationSettings,
-  EventChannel,
-  EventMap,
-  OverlayMode,
-  SttSettings,
-  VideoSource,
-  VideoStartOptions,
+import {
+  MAX_STT_KEYTERMS,
+  type AppState,
+  type AudioSettings,
+  type DiarizationSettings,
+  type EventChannel,
+  type EventMap,
+  type OverlayMode,
+  type SttSettings,
+  type VideoSource,
+  type VideoStartOptions,
 } from '@shared/ipc';
 import {
   DEFAULT_MODELS,
-  parseTriggerPhrases,
   type LlmProviderId,
   type LlmRoute,
   type LlmTask,
@@ -21,8 +21,10 @@ import {
   type Turn,
 } from '@shared/assistant';
 import type { PipelineToMain } from '@shared/pipeline-protocol';
+import { parseCommaList } from '@shared/text';
 import type { Segment } from '@shared/transcript';
-import { CaptureHost, installDisplayMediaHandler, listVideoSources } from './capture-host';
+import { checkDeepgramSettings } from './deepgram-check';
+import { CaptureHost, captureScreenshot, installDisplayMediaHandler, listVideoSources } from './capture-host';
 import { registerHotkeys, unregisterHotkeys } from './hotkeys';
 import { readOwnerContext, writeOwnerContext } from './owner-context';
 import { PipelineHost } from './pipeline-host';
@@ -211,6 +213,23 @@ export class AppController {
     const status = this.store.get().video.status;
     if (status === 'recording') void this.stopVideo();
     else if (status === 'idle') void this.startVideo();
+  }
+
+  /**
+   * Captures the source picked for video and attaches it to the last question (taking in the remote
+   * phrases said since, as the extend hotkey does), then answers again.
+   */
+  async takeScreenshot(): Promise<void> {
+    if (!this.requireRunningSession()) return;
+    const { sourceId, sourceName } = this.store.get().video;
+    try {
+      const png = await captureScreenshot(sourceId ? { id: sourceId, name: sourceName } : null);
+      const file = this.session.saveScreenshot(png);
+      if (!file) return;
+      this.pipeline.send({ type: 'assistant:screenshot', file, png: png.toString('base64') });
+    } catch (e) {
+      this.setAssistantError(e instanceof Error ? e.message : String(e));
+    }
   }
 
   /** The capture window already stopped the recorder: the source went away. */
@@ -435,7 +454,7 @@ export class AppController {
   }
 
   setTriggerPhrases(text: string): string[] {
-    const triggerPhrases = parseTriggerPhrases(text);
+    const triggerPhrases = parseCommaList(text);
     this.settings.update((s) => ({ ...s, triggerPhrases }));
     this.store.update((s) => ({ ...s, assistant: { ...s.assistant, triggerPhrases } }));
     this.pipeline.send({ type: 'assistant:set-triggers', phrases: triggerPhrases });
@@ -454,6 +473,20 @@ export class AppController {
     const stt = { ...this.settings.get().stt, ...patch };
     this.settings.update((s) => ({ ...s, stt }));
     this.store.update((s) => ({ ...s, stt: { ...s.stt, ...stt } }));
+  }
+
+  /** @returns an error (nothing saved) when there are too many terms or Deepgram rejects them. */
+  async setSttKeyterms(text: string): Promise<string | null> {
+    const keyterms = parseCommaList(text);
+    if (keyterms.length > MAX_STT_KEYTERMS) {
+      return `Терминов ${keyterms.length} — максимум ${MAX_STT_KEYTERMS}: длинный список ухудшает распознавание`;
+    }
+    const stt = { ...this.settings.get().stt, keyterms };
+    const apiKey = this.secrets.get('deepgramApiKey');
+    const error = apiKey && keyterms.length > 0 ? await checkDeepgramSettings(apiKey, stt) : null;
+    if (error) return error;
+    this.setSttSettings({ keyterms });
+    return null;
   }
 
   setSttKey(key: string | null): void {
@@ -539,7 +572,10 @@ export class AppController {
         this.setOverlayMode(overlay().mode === 'interactive' ? 'passthrough' : 'interactive'),
       'overlay.opacityDown': () => this.setOverlayOpacity(overlay().opacity - OPACITY_STEP),
       'overlay.opacityUp': () => this.setOverlayOpacity(overlay().opacity + OPACITY_STEP),
+      'overlay.scrollUp': () => broadcast('overlay:scroll', -1),
+      'overlay.scrollDown': () => broadcast('overlay:scroll', 1),
       'video.toggle': () => this.toggleVideo(),
+      screenshot: () => void this.takeScreenshot(),
       'question.answer': () => this.answerQuestion(null),
       'question.mark': () => this.markQuestion(),
       'question.prev': () => this.stepQuestion(-1),

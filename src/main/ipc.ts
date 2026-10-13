@@ -40,6 +40,7 @@ export function registerIpc(app: AppController): void {
       if (language) next.language = language;
       app.setSttSettings(next);
     },
+    'stt:set-keyterms': (_e, text) => app.setSttKeyterms(asString(text) ?? ''),
     'diarization:set-settings': (_e, patch) => {
       const threshold = Number(patch.threshold);
       if (Number.isFinite(threshold)) {
@@ -83,6 +84,7 @@ export function registerIpc(app: AppController): void {
     },
     'video:start': () => app.startVideo(),
     'video:stop': () => app.stopVideo(),
+    'screenshot:take': () => app.takeScreenshot(),
     'capture:audio-chunk': (event, chunk) => {
       if (app.isCaptureSender(event.sender) && chunk instanceof ArrayBuffer) app.appendAudioChunk(chunk);
     },

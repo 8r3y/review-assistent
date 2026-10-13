@@ -36,9 +36,10 @@ export const DEFAULT_HOTKEYS: HotkeyBindings = {
   'overlay.toggleMode': 'CommandOrControl+Alt+T',
   'overlay.opacityDown': 'CommandOrControl+Alt+[',
   'overlay.opacityUp': 'CommandOrControl+Alt+]',
+  'overlay.scrollUp': 'CommandOrControl+Alt+PageUp',
+  'overlay.scrollDown': 'CommandOrControl+Alt+PageDown',
   'video.toggle': 'CommandOrControl+Alt+V',
   screenshot: 'CommandOrControl+Alt+P',
-  marker: 'CommandOrControl+Alt+M',
   'question.answer': 'CommandOrControl+Alt+A',
   'question.mark': 'CommandOrControl+Alt+Q',
   'question.prev': 'CommandOrControl+Alt+Up',
@@ -51,7 +52,12 @@ const DEFAULTS: Settings = {
   hotkeys: DEFAULT_HOTKEYS,
   audio: { micDeviceId: null, recordAudio: true },
   video: { sourceId: null, sourceName: null },
-  stt: { model: 'nova-3', language: 'ru' },
+  stt: {
+    model: 'nova-3',
+    language: 'ru',
+    // The Russian model drops English words it was not prompted with («между Kafka и RabbitMQ» → «между и»).
+    keyterms: ['Kafka', 'RabbitMQ', 'Kubernetes', 'Docker', 'PostgreSQL', 'Redis', 'gRPC', 'GraphQL'],
+  },
   vad: { onThreshold: 0.5, offThreshold: 0.35, minSpeechMs: 250, minSilenceMs: 600 },
   // Pre-roll must exceed minSpeechMs: the VAD confirms speech that late.
   gate: { enabled: true, preRollMs: 500, closeAfterSilenceMs: 1500 },

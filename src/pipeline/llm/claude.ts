@@ -3,7 +3,7 @@ import { betaZodOutputFormat } from '@anthropic-ai/sdk/helpers/beta/zod';
 import type { LlmRoute } from '@shared/assistant';
 import { ANALYZE_SYSTEM, ANSWER_SYSTEM, ownerContextBlock } from '../assistant/prompts';
 import { AnalysisSchema } from './analysis-schema';
-import { LlmError, type AnalysisResult, type LlmBackend } from './provider';
+import { LlmError, type AnalysisResult, type AnswerRequest, type LlmBackend } from './provider';
 import { retryingFetch } from './retry-fetch';
 
 /** On a policy refusal the API re-runs the request on a fallback model chosen by refusal category. */
@@ -52,7 +52,7 @@ export class ClaudeBackend implements LlmBackend {
   }
 
   async streamAnswer(
-    message: string,
+    request: AnswerRequest,
     route: LlmRoute,
     onText: (delta: string) => void,
     signal?: AbortSignal,
@@ -64,7 +64,18 @@ export class ClaudeBackend implements LlmBackend {
         max_tokens: ANSWER_MAX_TOKENS,
         output_config: { effort: route.effort },
         system: this.answerSystem,
-        messages: [{ role: 'user', content: message }],
+        messages: [
+          {
+            role: 'user',
+            content: [
+              ...request.images.map((image) => ({
+                type: 'image' as const,
+                source: { type: 'base64' as const, media_type: image.mediaType, data: image.data },
+              })),
+              { type: 'text' as const, text: request.text },
+            ],
+          },
+        ],
       },
       { signal },
     );

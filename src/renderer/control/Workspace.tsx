@@ -192,6 +192,12 @@ function QuestionCard({
         </span>
         <Speaker speaker={q.askedBy} />
         <span className={styles.muted}>{STATUS_LABELS[q.status]}</span>
+        {!q.worded && <span className={styles.bad}>не определён</span>}
+        {q.screenshots.length > 0 && (
+          <span className={styles.muted} title={q.screenshots.join(', ')}>
+            📷 {q.screenshots.length}
+          </span>
+        )}
         <span className={styles.spacer} />
         {!current && (
           <button

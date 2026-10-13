@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { parseTriggerPhrases } from '@shared/assistant';
+import { parseCommaList } from '@shared/text';
 import { TriggerMatcher } from './triggers';
 
-describe('parseTriggerPhrases', () => {
+describe('parseCommaList', () => {
   it('splits by comma, trims and drops empty and duplicate phrases', () => {
-    expect(parseTriggerPhrases(' Хороший вопрос ,, понял  ваш вопрос, хороший вопрос, ! ')).toEqual([
+    expect(parseCommaList(' Хороший вопрос ,, понял  ваш вопрос, хороший вопрос, ! ')).toEqual([
       'Хороший вопрос',
       'понял ваш вопрос',
     ]);

@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { formatSessionTime } from '@shared/clock';
-import { OVERLAY_HANDLE_HEIGHT } from '@shared/ipc';
+import { OVERLAY_HANDLE_HEIGHT, OVERLAY_SCROLLBAR_WIDTH } from '@shared/ipc';
 import { speakerLabel } from '@shared/transcript';
 import { useQuestions } from '../common/useAssistant';
 import { useAppState, useNow } from '../common/useAppState';
@@ -13,7 +13,9 @@ export function OverlayApp(): React.JSX.Element {
   const now = useNow(1000);
   const activity = useAudioActivity();
   const questions = useQuestions();
-  const answerRef = useRef<HTMLDivElement>(null);
+  const bodyRef = useRef<HTMLDivElement>(null);
+  /** The reader is at the bottom: keep following the streaming answer. */
+  const stickRef = useRef(false);
 
   const session = state?.session;
   const running = session?.status === 'running' || session?.status === 'starting';
@@ -22,14 +24,33 @@ export function OverlayApp(): React.JSX.Element {
   const error = state?.capture.error ?? state?.assistant.error ?? (running ? state?.stt.error : null);
   const answerText = current?.answer?.text;
 
-  // Follow the streaming answer.
+  // Hotkeys scroll by most of a page, keeping a line of context.
+  useEffect(
+    () =>
+      window.api.on('overlay:scroll', (direction) => {
+        const el = bodyRef.current;
+        if (el) el.scrollBy({ top: direction * el.clientHeight * 0.8, behavior: 'smooth' });
+      }),
+    [],
+  );
+
+  // A new question is read from the top.
   useEffect(() => {
-    const el = answerRef.current;
-    if (el && current?.status === 'answering') el.scrollTop = el.scrollHeight;
-  }, [answerText, current?.status]);
+    if (bodyRef.current) bodyRef.current.scrollTop = 0;
+    stickRef.current = false;
+  }, [current?.id]);
+
+  // Follow the streaming answer only while the reader stays at the bottom.
+  useEffect(() => {
+    const el = bodyRef.current;
+    if (el && stickRef.current) el.scrollTop = el.scrollHeight;
+  }, [answerText]);
 
   return (
-    <div className={styles.root}>
+    <div
+      className={styles.root}
+      style={{ '--scrollbar-width': `${OVERLAY_SCROLLBAR_WIDTH}px` } as React.CSSProperties}
+    >
       <div className={styles.handle} style={{ height: OVERLAY_HANDLE_HEIGHT }}>
         <span className={styles.grip} aria-hidden>
           ⠿
@@ -67,7 +88,14 @@ export function OverlayApp(): React.JSX.Element {
         </span>
       </div>
 
-      <div className={styles.body}>
+      <div
+        ref={bodyRef}
+        className={styles.body}
+        onScroll={(e) => {
+          const el = e.currentTarget;
+          stickRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 24;
+        }}
+      >
         {error && <p className={styles.error}>{error}</p>}
         {!current && !error && (
           <p className={styles.hint}>
@@ -76,17 +104,24 @@ export function OverlayApp(): React.JSX.Element {
         )}
         {current && (
           <>
-            <p className={styles.question}>
+            <p className={current.worded ? styles.question : styles.questionRaw}>
               <span className={styles.asker}>{speakerLabel(current.askedBy)}</span>
               {current.text}
+              {current.screenshots.length > 0 && (
+                <span className={styles.muted}> · 📷 {current.screenshots.length}</span>
+              )}
             </p>
             {current.answer ? (
-              <div ref={answerRef} className={styles.answer}>
+              <div className={styles.answer}>
                 {current.answer.text || <span className={styles.muted}>Готовлю ответ…</span>}
                 {current.answer.error && <p className={styles.error}>{current.answer.error}</p>}
               </div>
             ) : (
-              <p className={styles.hint}>Ctrl+Alt+A — ответить</p>
+              <p className={styles.hint}>
+                {current.worded
+                  ? 'Ctrl+Alt+A — ответить'
+                  : 'Вопрос не определён: Ctrl+Alt+P — скриншот, или уточните и Ctrl+Alt+A'}
+              </p>
             )}
           </>
         )}

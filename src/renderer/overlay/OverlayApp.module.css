@@ -101,8 +101,30 @@
   flex-direction: column;
   flex: 1;
   min-height: 0;
-  padding: 8px 14px 12px;
+  padding: 8px 4px 12px 14px;
   gap: 8px;
+  /* Question and answer scroll together: a long question must not squeeze the answer out. */
+  overflow-y: scroll;
+  overscroll-behavior: contain;
+}
+
+/* Wide and always present: in passthrough mode this strip is the only scrollable part of the overlay. */
+.body::-webkit-scrollbar {
+  width: var(--scrollbar-width);
+}
+
+.body::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.body::-webkit-scrollbar-thumb {
+  border: 3px solid transparent;
+  border-radius: 7px;
+  background: rgba(255, 255, 255, 0.28) padding-box;
+}
+
+.body::-webkit-scrollbar-thumb:hover {
+  background-color: rgba(255, 255, 255, 0.45);
 }
 
 .question {
@@ -112,6 +134,15 @@
   font-weight: 600;
   line-height: 1.35;
   text-shadow: 0 1px 2px rgba(0, 0, 0, 0.6);
+}
+
+/* Raw phrases of a question the LLM could not word. */
+.questionRaw {
+  composes: question;
+  font-size: 15px;
+  font-weight: 400;
+  font-style: italic;
+  color: rgba(242, 242, 245, 0.75);
 }
 
 .asker {
@@ -126,11 +157,9 @@
 }
 
 .answer {
-  flex: 1;
-  min-height: 0;
+  flex: none;
   padding-top: 8px;
   border-top: 1px solid rgba(255, 255, 255, 0.14);
-  overflow-y: auto;
   font-size: 16px;
   line-height: 1.45;
   white-space: pre-wrap;

@@ -1,5 +1,5 @@
 import { BrowserWindow, screen, type Rectangle } from 'electron';
-import { OVERLAY_HANDLE_HEIGHT, type OverlayMode } from '@shared/ipc';
+import { OVERLAY_HANDLE_HEIGHT, OVERLAY_SCROLLBAR_WIDTH, type OverlayMode } from '@shared/ipc';
 import { loadPage, preloadPath } from './load';
 
 export const MIN_OPACITY = 0.2;
@@ -16,7 +16,8 @@ export interface OverlayOptions {
 
 /**
  * Transparent always-on-top overlay excluded from screen capture (WDA_EXCLUDEFROMCAPTURE on Windows).
- * In passthrough mode clicks go through the window, except over the top handle bar so it can still be dragged.
+ * In passthrough mode clicks go through the window, except over the top handle bar (to drag it) and the
+ * scrollbar on the right edge (to scroll a long answer).
  */
 export class OverlayWindow {
   readonly win: BrowserWindow;
@@ -81,19 +82,18 @@ export class OverlayWindow {
     this.startHoverPolling();
   }
 
-  /** Passthrough: accept mouse input only while the cursor is over the handle bar. */
+  /** Passthrough: accept mouse input only while the cursor is over the handle bar or the scrollbar. */
   private startHoverPolling(): void {
     if (this.hoverTimer) return;
     this.hoverTimer = setInterval(() => {
       if (this.win.isDestroyed() || !this.win.isVisible()) return;
       const cursor = screen.getCursorScreenPoint();
       const b = this.win.getContentBounds();
-      const overHandle =
-        cursor.x >= b.x &&
-        cursor.x < b.x + b.width &&
-        cursor.y >= b.y &&
-        cursor.y < b.y + OVERLAY_HANDLE_HEIGHT;
-      this.setIgnoreMouse(!overHandle);
+      const inside =
+        cursor.x >= b.x && cursor.x < b.x + b.width && cursor.y >= b.y && cursor.y < b.y + b.height;
+      const overHandle = cursor.y < b.y + OVERLAY_HANDLE_HEIGHT;
+      const overScrollbar = cursor.x >= b.x + b.width - OVERLAY_SCROLLBAR_WIDTH;
+      this.setIgnoreMouse(!(inside && (overHandle || overScrollbar)));
     }, HOVER_POLL_MS);
   }
 

@@ -27,7 +27,7 @@ export interface DeepgramResults {
 }
 
 export function buildDeepgramUrl(
-  options: Pick<SttStreamOptions, 'sampleRate' | 'language' | 'model' | 'diarize'>,
+  options: Pick<SttStreamOptions, 'sampleRate' | 'language' | 'model' | 'keyterms' | 'diarize'>,
 ): string {
   const params = new URLSearchParams({
     model: options.model,
@@ -42,6 +42,8 @@ export function buildDeepgramUrl(
     utterance_end_ms: '1000',
     diarize: String(options.diarize),
   });
+  // Keyterm prompting (Nova-3): one parameter per term.
+  for (const term of options.keyterms) params.append('keyterm', term);
   return `${ENDPOINT}?${params}`;
 }
 
@@ -177,7 +179,9 @@ class DeepgramStream implements SttStream {
       this.failures++;
       const reason = opened
         ? `соединение закрыто (${event.code})`
-        : 'не удалось подключиться: проверьте API-ключ, модель и язык';
+        : this.options.keyterms.length > 0
+          ? 'не удалось подключиться: проверьте API-ключ, модель, язык и термины'
+          : 'не удалось подключиться: проверьте API-ключ, модель и язык';
       const delay = RECONNECT_DELAYS_MS[Math.min(this.failures - 1, RECONNECT_DELAYS_MS.length - 1)]!;
       this.options.onStatus(this.failures >= 3 && !opened ? 'error' : 'reconnecting', reason);
       this.reconnectTimer = setTimeout(() => this.connect(), delay);

@@ -10,16 +10,20 @@ Return JSON with "summaries" and "question".
 
 "summaries": for every turn id listed in "summarize", one short line (≤ 15 words, the language of the turn) with its gist. Empty array when "summarize" is absent or empty.
 
-"question": only when "phrases" is present. The owner marked the moment a participant asked them a question; "phrases" are what the participants said since the owner's previous mark, oldest first. Write one self-contained, concise wording of the question the participant just asked, in the language of the conversation:
-- the question is usually at the end of "phrases"; earlier phrases may be answers, comments or small talk — use them only if the question starts there, continues there or refers to them;
+"question": only when "phrases" is present. The owner marked the moment a participant asked them a question; "phrases" are what was said since the owner's previous mark, by both sides, oldest first. Write one self-contained, concise wording of the question the participant just asked, in the language of the conversation:
+- the question is usually at the end of the participants' phrases; their earlier phrases may be answers, comments or small talk — use them only if the question starts there, continues there or refers to them;
+- the owner's phrases may clarify the question («you mean on Go?», «for how many users?») — fold the participant's confirmations and corrections into the wording; the owner may also still be answering an earlier question — ignore that;
 - never merge unrelated questions: if "phrases" hold several, word the last one (with any part of it asked earlier);
 - "previousWording", if present, is how this question was worded before more phrases were added: keep its meaning and extend it with the new phrases;
 - "context" holds earlier turns of the conversation for reference only — never take the question from there.
-If "phrases" contain no question or request to the owner, word their main point as a question anyway. Without "phrases", "question" is null.`;
+If the participants' phrases contain no question or request to the owner, word their main point as a question anyway.
+If "phrases" hold only the owner's words, the owner is restating a question (read out from a chat, a task or the screen, or repeated because the participant was not heard) or asking for help with their own question: word that question. If the owner's words hold no question at all, "question" is null. Without "phrases", "question" is null.`;
 
 export const ANSWER_SYSTEM = `You help the user ("owner") during a live call: you write the answer the owner can say to a question just asked.
 
-Answer briefly: the gist first, then at most 3–5 short points or sentences the owner can glance at while talking. No preamble, no restating the question, no meta comments. Answer in the language of the question. Speak as the owner, in first person where it fits. Use the owner's context when it is relevant; do not make up facts about the owner — if the answer depends on details you do not have, give the general answer and mark what to fill in.`;
+Answer briefly: the gist first, then at most 3–5 short points or sentences the owner can glance at while talking. No preamble, no restating the question, no meta comments. Answer in the language of the question. Speak as the owner, in first person where it fits. Use the owner's context when it is relevant; do not make up facts about the owner — if the answer depends on details you do not have, give the general answer and mark what to fill in.
+
+The owner may attach screenshots of their screen — a diagram, a document or code shared for live coding. When they are attached, the question is about what is on them: read them carefully and answer about that content. For a coding task, give working code first, then a short explanation; for a diagram, refer to its parts by their labels.`;
 
 const RECENT_TURNS = 40;
 
@@ -38,7 +42,7 @@ export function buildSummaryMessage(turns: Turn[], summarizeTurnIds: string[]): 
 }
 
 export interface QuestionInput {
-  /** Remote phrases since the previous mark, oldest first. */
+  /** Phrases of both sides since the previous mark, oldest first. */
   phrases: Segment[];
   /** Earlier turns, for reference. */
   context: Turn[];
@@ -57,17 +61,24 @@ export function buildQuestionMessage(input: QuestionInput): string {
 
 export interface AnswerInput {
   question: Question;
-  /** The question's source phrases. */
+  /** How many screenshots go with the request. */
+  screenshots: number;
+  /** The question's source phrases, both sides. */
   phrases: Segment[];
   turns: Turn[];
 }
 
-export function buildAnswerMessage({ question, phrases, turns }: AnswerInput): string {
+export function buildAnswerMessage({ question, screenshots, phrases, turns }: AnswerInput): string {
   const lines = [
-    `Question (asked by ${question.askedBy}): ${question.text}`,
+    question.worded
+      ? `Question (asked by ${question.askedBy}): ${question.text}`
+      : 'Question: not worded — work out what the owner needs from the phrases and screenshots below.',
+    ...(screenshots > 0
+      ? ['', `Screenshots of the owner's screen attached: ${screenshots} (the latest is the last one).`]
+      : []),
     '',
-    'Original phrasing:',
-    ...phrases.map((s) => `- ${s.text}`),
+    "Original phrasing (with the owner's clarifications):",
+    ...phrases.map((s) => `- ${speakerName(s.speaker)}: ${s.text}`),
     '',
     'Recent conversation:',
     ...turns

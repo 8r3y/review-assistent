@@ -8,7 +8,14 @@ import {
   type LlmTask,
 } from '@shared/assistant';
 import { formatSessionTime } from '@shared/clock';
-import type { AppState, HotkeyAction, OverlayMode, VideoSource } from '@shared/ipc';
+import { parseCommaList } from '@shared/text';
+import {
+  MAX_STT_KEYTERMS,
+  type AppState,
+  type HotkeyAction,
+  type OverlayMode,
+  type VideoSource,
+} from '@shared/ipc';
 import type { ChannelActivity, SttStatus } from '@shared/transcript';
 import { levelFraction } from '../common/activity';
 import { useAppState, useNow } from '../common/useAppState';
@@ -22,9 +29,10 @@ const HOTKEY_LABELS: Record<HotkeyAction, string> = {
   'overlay.toggleMode': 'Сквозной режим вкл/выкл',
   'overlay.opacityDown': 'Прозрачность −',
   'overlay.opacityUp': 'Прозрачность +',
+  'overlay.scrollUp': 'Прокрутить оверлей вверх',
+  'overlay.scrollDown': 'Прокрутить оверлей вниз',
   'video.toggle': 'Видеозапись старт/стоп',
-  screenshot: 'Скриншот',
-  marker: 'Маркер',
+  screenshot: 'Скриншот к последнему вопросу + ответ',
   'question.answer': 'Дополнить последний вопрос новыми фразами и ответить',
   'question.mark': 'Вопрос из фраз собеседника после прошлого вопроса + ответ',
   'question.prev': 'Предыдущий вопрос',
@@ -148,7 +156,7 @@ function VideoCard({ state }: { state: AppState }): React.JSX.Element {
     void window.api.invoke('video:set-source', { id: s.id, name: s.name });
   return (
     <section className={styles.card}>
-      <h2>Видео</h2>
+      <h2>Видео и скриншоты</h2>
       <div className={styles.row}>
         <button
           className={recording ? styles.danger : styles.primary}
@@ -168,6 +176,13 @@ function VideoCard({ state }: { state: AppState }): React.JSX.Element {
         </span>
         <span className={styles.muted}>{video.sourceName ?? 'Основной экран'}</span>
         <span className={styles.spacer} />
+        <button
+          className={styles.secondary}
+          disabled={!sessionRunning}
+          onClick={() => void window.api.invoke('screenshot:take')}
+        >
+          Скриншот к вопросу
+        </button>
         <button className={styles.secondary} disabled={recording || busy} onClick={refresh}>
           Обновить список
         </button>
@@ -193,6 +208,11 @@ function VideoCard({ state }: { state: AppState }): React.JSX.Element {
       <p className={styles.muted}>
         Запись идёт во время сессии в её папку (до 1920×1080, 30 к/с). При остановке сессии в видео вшивается
         звук разговора. Оверлей в запись не попадает. Горячая клавиша — в таблице ниже.
+      </p>
+      <p className={styles.muted}>
+        Скриншот снимает тот же источник и добавляется к последнему вопросу вместе с новыми фразами
+        собеседника — ответ генерируется заново с учётом экрана (схема, код для лайвкодинга). Оверлей на
+        скриншот не попадает.
       </p>
     </section>
   );
@@ -264,6 +284,8 @@ function SttCard({ state }: { state: AppState }): React.JSX.Element {
           onBlur={(e) => void window.api.invoke('stt:set-settings', { language: e.target.value })}
         />
       </label>
+      {/* key: reset the field when the saved list changes */}
+      <KeytermsRow key={stt.keyterms.join(', ')} keyterms={stt.keyterms} locked={locked} />
       <div className={styles.row}>
         <span className={styles.label}>Статус</span>
         <span>Я: {STT_STATUS_LABELS[stt.status.mic]}</span>
@@ -337,6 +359,55 @@ function AssistantCard({ state }: { state: AppState }): React.JSX.Element {
       </div>
       {assistant.error && <p className={styles.bad}>{assistant.error}</p>}
     </section>
+  );
+}
+
+function KeytermsRow({ keyterms, locked }: { keyterms: string[]; locked: boolean }): React.JSX.Element {
+  const saved = keyterms.join(', ');
+  const [value, setValue] = useState(saved);
+  const [checking, setChecking] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const count = parseCommaList(value).length;
+  const tooMany = count > MAX_STT_KEYTERMS;
+  const dirty = value.trim() !== saved;
+  const canSave = !locked && dirty && !tooMany && !checking;
+  const save = (): void => {
+    setChecking(true);
+    void window.api
+      .invoke('stt:set-keyterms', value)
+      .then(setError)
+      .finally(() => setChecking(false));
+  };
+  return (
+    <label className={styles.column}>
+      <span className={styles.label}>
+        Термины через запятую — слова, которые распознавание должно слышать (англицизмы: Kafka, RabbitMQ…).
+        Русская модель без подсказки пропускает английские слова. Лучше 20–50 самых нужных: длинный список
+        размывает подсказку. Применяется со следующей сессии.
+      </span>
+      <div className={styles.row}>
+        <input
+          className={styles.wide}
+          disabled={locked}
+          value={value}
+          placeholder="Kafka, RabbitMQ, Kubernetes"
+          onChange={(e) => {
+            setValue(e.target.value);
+            setError(null);
+          }}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' && canSave) save();
+          }}
+        />
+        <button className={styles.secondary} disabled={!canSave} onClick={save}>
+          {checking ? 'Проверяю…' : 'Сохранить'}
+        </button>
+        <span className={tooMany ? styles.bad : styles.muted}>
+          {count} / {MAX_STT_KEYTERMS}
+        </span>
+      </div>
+      {error && <span className={styles.bad}>{error}</span>}
+    </label>
   );
 }
 
@@ -543,7 +614,7 @@ function OverlayCard({ state }: { state: AppState }): React.JSX.Element {
         </label>
         <label>
           <input type="radio" checked={mode === 'passthrough'} onChange={() => setMode('passthrough')} />
-          Сквозной (клики проходят насквозь, кроме верхней полосы)
+          Сквозной (клики проходят насквозь, кроме верхней полосы и полосы прокрутки справа)
         </label>
       </div>
       <label className={styles.row}>
