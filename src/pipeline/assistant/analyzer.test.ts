@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { AnalysisResult } from '../llm/provider';
 import { TurnAnalyzer } from './analyzer';
 
-const EMPTY: AnalysisResult = { summaries: [], ops: [] };
+const EMPTY: AnalysisResult = { summaries: [], question: null };
 
 function deferred(): { promise: Promise<AnalysisResult>; resolve: () => void } {
   let resolve!: () => void;
@@ -36,18 +36,6 @@ describe('TurnAnalyzer', () => {
     gates.shift()!();
     await new Promise((r) => setTimeout(r, 0));
     expect(analyzer.idle).toBe(true);
-  });
-
-  it('force resolves after its request is applied and reports it as forced', async () => {
-    const forcedSeen: (string[] | null)[] = [];
-    const analyzer = new TurnAnalyzer({
-      buildMessage: (ids) => ids.join(','),
-      analyze: async () => EMPTY,
-      onResult: (_r, forced) => forcedSeen.push(forced),
-      onError: () => {},
-    });
-    await analyzer.force(['t9']);
-    expect(forcedSeen).toEqual([['t9']]);
   });
 
   it('reports errors and keeps going', async () => {

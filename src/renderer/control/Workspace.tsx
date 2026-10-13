@@ -19,7 +19,6 @@ const STATUS_LABELS: Record<QuestionStatus, string> = {
   open: 'открыт',
   answering: 'отвечаю…',
   answered: 'отвечен',
-  closed: 'снят',
   dismissed: 'отклонён',
 };
 
@@ -156,8 +155,8 @@ function QuestionsTab({ state }: { state: AppState }): React.JSX.Element {
       )}
       {visible.length === 0 && (
         <p className={styles.muted}>
-          Вопросов пока нет. Они появляются автоматически; Ctrl+Alt+Q — отметить последние фразы собеседника
-          как вопрос.
+          Вопросов пока нет. Скажите ключевую фразу (например, «хороший вопрос») или нажмите Ctrl+Alt+Q —
+          последние фразы собеседника станут вопросом, и ответ на него сгенерируется сразу.
         </p>
       )}
       {visible.map((q, i) => (
@@ -218,16 +217,6 @@ function QuestionCard({
         </button>
       </div>
       <p className={styles.questionText}>{q.text}</p>
-      {q.clarifications.length > 0 && (
-        <ul className={styles.clarifications}>
-          {q.clarifications.map((c) => (
-            <li key={c.turnId}>
-              <Speaker speaker={c.speaker} />
-              {c.text}
-            </li>
-          ))}
-        </ul>
-      )}
       {q.answer && (
         <div className={styles.answerText}>
           {q.answer.text || <span className={styles.muted}>Готовлю ответ…</span>}

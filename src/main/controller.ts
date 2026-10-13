@@ -13,6 +13,7 @@ import type {
 } from '@shared/ipc';
 import {
   DEFAULT_MODELS,
+  parseTriggerPhrases,
   type LlmProviderId,
   type LlmRoute,
   type LlmTask,
@@ -82,7 +83,13 @@ export class AppController {
       },
       overlay: { visible: true, mode: overlay.mode, opacity: clampOpacity(overlay.opacity) },
       video: { ...video, status: 'idle', startedAt: null, error: null },
-      assistant: { ...assistant, keys: this.llmKeyFlags(), endpoints: this.llmEndpoints(), error: null },
+      assistant: {
+        ...assistant,
+        keys: this.llmKeyFlags(),
+        endpoints: this.llmEndpoints(),
+        triggerPhrases: this.settings.get().triggerPhrases,
+        error: null,
+      },
       questions: this.questions.nav(),
       hotkeys: [],
       pipeline: { alive: false },
@@ -260,6 +267,7 @@ export class AppController {
           endpoints: this.llmEndpoints(),
           settings: assistant,
           ownerContext: readOwnerContext(),
+          triggerPhrases: this.settings.get().triggerPhrases,
         },
       },
     });
@@ -343,13 +351,10 @@ export class AppController {
     return this.questions.list();
   }
 
-  /** null → the current question (or, with none, the last remote turns made into a question). */
+  /** null → extend the last question with the remote phrases said since its mark and answer again. */
   answerQuestion(questionId: string | null): void {
     if (!this.requireRunningSession()) return;
-    this.pipeline.send({
-      type: 'assistant:answer',
-      questionId: questionId ?? this.questions.current()?.id ?? null,
-    });
+    this.pipeline.send({ type: 'assistant:answer', questionId });
   }
 
   markQuestion(): void {
@@ -427,6 +432,14 @@ export class AppController {
 
   private llmKeyFlags(): Record<LlmProviderId, boolean> {
     return { anthropic: this.secrets.has('anthropicApiKey'), google: this.secrets.has('googleApiKey') };
+  }
+
+  setTriggerPhrases(text: string): string[] {
+    const triggerPhrases = parseTriggerPhrases(text);
+    this.settings.update((s) => ({ ...s, triggerPhrases }));
+    this.store.update((s) => ({ ...s, assistant: { ...s.assistant, triggerPhrases } }));
+    this.pipeline.send({ type: 'assistant:set-triggers', phrases: triggerPhrases });
+    return triggerPhrases;
   }
 
   getOwnerContext(): string {

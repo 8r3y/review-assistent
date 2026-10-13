@@ -1,8 +1,9 @@
-import type { LlmRoute, QuestionOp } from '@shared/assistant';
+import type { LlmRoute } from '@shared/assistant';
 
 export interface AnalysisResult {
   summaries: { turnId: string; summary: string }[];
-  ops: QuestionOp[];
+  /** Wording of the marked question; null when none was asked for or none was found. */
+  question: string | null;
 }
 
 /** What the assistant engine needs. Messages are built by assistant/prompts.ts. */

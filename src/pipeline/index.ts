@@ -40,6 +40,9 @@ parent.on('message', ({ data, ports }: { data: MainToPipeline; ports: MessagePor
     case 'assistant:mark-question':
       session?.markQuestion();
       break;
+    case 'assistant:set-triggers':
+      session?.setTriggerPhrases(data.phrases);
+      break;
     case 'assistant:dismiss':
       session?.dismissQuestion(data.questionId);
       break;

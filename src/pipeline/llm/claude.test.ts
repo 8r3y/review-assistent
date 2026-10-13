@@ -11,7 +11,7 @@ function capture(backend: ClaudeBackend): { params: () => Record<string, unknown
   client.beta.messages = {
     parse: async (p: Record<string, unknown>) => {
       params = p;
-      return { stop_reason: 'end_turn', parsed_output: { summaries: [], ops: [] } };
+      return { stop_reason: 'end_turn', parsed_output: { summaries: [], question: null } };
     },
   };
   return { params: () => params };

@@ -71,7 +71,7 @@ export function OverlayApp(): React.JSX.Element {
         {error && <p className={styles.error}>{error}</p>}
         {!current && !error && (
           <p className={styles.hint}>
-            {running ? 'Вопросов пока нет · Ctrl+Alt+Q — это вопрос' : 'Ctrl+Alt+S — начать сессию'}
+            {running ? 'Вопросов пока нет · ключевая фраза или Ctrl+Alt+Q' : 'Ctrl+Alt+S — начать сессию'}
           </p>
         )}
         {current && (
@@ -80,7 +80,6 @@ export function OverlayApp(): React.JSX.Element {
               <span className={styles.asker}>{speakerLabel(current.askedBy)}</span>
               {current.text}
             </p>
-            {current.status === 'closed' && <p className={styles.muted}>вопрос снят</p>}
             {current.answer ? (
               <div ref={answerRef} className={styles.answer}>
                 {current.answer.text || <span className={styles.muted}>Готовлю ответ…</span>}

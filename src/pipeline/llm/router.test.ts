@@ -15,10 +15,11 @@ describe('createLlm', () => {
       keys: { anthropic: 'k', google: null },
       settings,
       ownerContext: '',
+      triggerPhrases: [],
       endpoints: NO_ENDPOINTS,
     });
     expect(setup.provider).toBeNull();
-    expect(setup.unavailable).toBe('Нет API-ключа: Gemini (Google AI) для поиска вопросов');
+    expect(setup.unavailable).toBe('Нет API-ключа: Gemini (Google AI) для вопросов и саммари');
   });
 
   it('builds a provider when every routed vendor has a key', () => {
@@ -26,6 +27,7 @@ describe('createLlm', () => {
       keys: { anthropic: 'k1', google: 'k2' },
       settings,
       ownerContext: 'notes',
+      triggerPhrases: [],
       endpoints: NO_ENDPOINTS,
     });
     expect(setup.unavailable).toBeNull();
@@ -38,6 +40,7 @@ describe('createLlm', () => {
       keys: { anthropic: null, google: 'k' },
       settings: allGoogle,
       ownerContext: '',
+      triggerPhrases: [],
       endpoints: NO_ENDPOINTS,
     });
     expect(setup.unavailable).toBeNull();

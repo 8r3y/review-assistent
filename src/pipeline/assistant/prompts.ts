@@ -1,25 +1,21 @@
 import type { Question, Turn } from '@shared/assistant';
 import { formatSessionTime } from '@shared/clock';
-import { OWNER } from '@shared/transcript';
+import { OWNER, type Segment } from '@shared/transcript';
 
 // Static system prompts: identical bytes on every call so they stay cacheable.
 
-export const ANALYZE_SYSTEM = `You watch a live call transcript for the user ("owner") and maintain the list of questions that other participants ask the owner.
+export const ANALYZE_SYSTEM = `You help the user ("owner") during a live call. Speaker "owner" is the user; "S1", "S2"… are other participants. Speech recognition is imperfect: fix obvious recognition errors, never invent content.
 
-The transcript arrives as turns: continuous speech of one speaker. Speaker "owner" is the user; "S1", "S2"… are other participants. Speech recognition is imperfect: fix obvious recognition errors when you reformulate, never invent content.
+Return JSON with "summaries" and "question".
 
-Return JSON with two arrays.
+"summaries": for every turn id listed in "summarize", one short line (≤ 15 words, the language of the turn) with its gist. Empty array when "summarize" is absent or empty.
 
-1. "summaries": for every turn listed in "summarize", one short line (≤ 15 words, the language of the turn) with its gist.
-
-2. "ops": changes to the question list, only where the transcript clearly calls for them:
-- "create": another participant asks the owner something — a question, a request to explain, describe, compare or give an example, possibly spread over several phrases or turns. "text" is one self-contained, concise wording of the whole question in the language of the conversation; "turnIds" are the turns it comes from. Rhetorical questions, small talk ("how are you?"), questions to someone else and the owner's own questions are not questions to answer.
-- "update": a participant continues, expands or rephrases an open question. "questionId" is the question, "text" the improved complete wording, "turnIds" the new turns.
-- "clarify": a turn narrows down or explains an open question without being part of it — e.g. the owner asks "you mean X?" and the participant confirms. "text" is a short note of what was clarified, "turnIds" the turns.
-- "close": the participant withdraws the question or moves on so it no longer needs an answer.
-Prefer "update" over a second "create" when new turns belong to an existing question. Use null for fields that do not apply. Return empty arrays when nothing changes.
-
-If "forceQuestionFrom" is present, the owner explicitly marked those turns as a question: you must return a "create" (or an "update" of the question they belong to) covering them.`;
+"question": only when "phrases" is present. The owner marked the moment a participant asked them a question; "phrases" are what the participants said since the owner's previous mark, oldest first. Write one self-contained, concise wording of the question the participant just asked, in the language of the conversation:
+- the question is usually at the end of "phrases"; earlier phrases may be answers, comments or small talk — use them only if the question starts there, continues there or refers to them;
+- never merge unrelated questions: if "phrases" hold several, word the last one (with any part of it asked earlier);
+- "previousWording", if present, is how this question was worded before more phrases were added: keep its meaning and extend it with the new phrases;
+- "context" holds earlier turns of the conversation for reference only — never take the question from there.
+If "phrases" contain no question or request to the owner, word their main point as a question anyway. Without "phrases", "question" is null.`;
 
 export const ANSWER_SYSTEM = `You help the user ("owner") during a live call: you write the answer the owner can say to a question just asked.
 
@@ -27,78 +23,57 @@ Answer briefly: the gist first, then at most 3–5 short points or sentences the
 
 const RECENT_TURNS = 40;
 
-function turnLine(t: Turn): Record<string, unknown> {
-  return {
-    id: t.id,
-    speaker: t.speaker,
-    at: formatSessionTime(t.tStart),
-    text: t.text,
-    ...(t.closed ? {} : { inProgress: true }),
-  };
+type Line = { speaker: string; tStart: number; text: string };
+
+function line(t: Line & { id?: string }): Record<string, unknown> {
+  return { ...(t.id ? { id: t.id } : {}), speaker: t.speaker, at: formatSessionTime(t.tStart), text: t.text };
 }
 
-function questionLine(q: Question): Record<string, unknown> {
-  return {
-    id: q.id,
-    text: q.text,
-    status: q.status,
-    turnIds: q.sourceTurnIds,
-    ...(q.clarifications.length > 0 ? { clarifications: q.clarifications.map((c) => c.text) } : {}),
-  };
+/** Background request: gists of long turns. */
+export function buildSummaryMessage(turns: Turn[], summarizeTurnIds: string[]): string {
+  return JSON.stringify({
+    turns: turns.slice(-RECENT_TURNS).map((t) => line(t)),
+    summarize: summarizeTurnIds,
+  });
 }
 
-export interface AnalyzeInput {
-  turns: Turn[];
-  questions: Question[];
-  /** Turns that triggered this call; the ones needing a summary are listed separately. */
-  newTurnIds: string[];
-  summarizeTurnIds: string[];
-  forceQuestionFrom: string[] | null;
+export interface QuestionInput {
+  /** Remote phrases since the previous mark, oldest first. */
+  phrases: Segment[];
+  /** Earlier turns, for reference. */
+  context: Turn[];
+  /** Wording before the question was extended. */
+  previousWording: string | null;
 }
 
-export function buildAnalyzeMessage(input: AnalyzeInput): string {
-  const payload = {
-    turns: input.turns.slice(-RECENT_TURNS).map(turnLine),
-    openQuestions: input.questions
-      .filter((q) => q.status !== 'dismissed' && q.status !== 'closed')
-      .map(questionLine),
-    newTurns: input.newTurnIds,
-    summarize: input.summarizeTurnIds,
-    ...(input.forceQuestionFrom ? { forceQuestionFrom: input.forceQuestionFrom } : {}),
-  };
-  return JSON.stringify(payload);
+/** On the owner's mark: word the question asked in `phrases`. */
+export function buildQuestionMessage(input: QuestionInput): string {
+  return JSON.stringify({
+    context: input.context.slice(-RECENT_TURNS).map((t) => line(t)),
+    phrases: input.phrases.map((s) => line(s)),
+    ...(input.previousWording ? { previousWording: input.previousWording } : {}),
+  });
 }
 
 export interface AnswerInput {
   question: Question;
+  /** The question's source phrases. */
+  phrases: Segment[];
   turns: Turn[];
 }
 
-export function buildAnswerMessage({ question, turns }: AnswerInput): string {
-  const byId = new Map(turns.map((t) => [t.id, t]));
+export function buildAnswerMessage({ question, phrases, turns }: AnswerInput): string {
   const lines = [
     `Question (asked by ${question.askedBy}): ${question.text}`,
     '',
     'Original phrasing:',
-    ...question.sourceTurnIds
-      .map((id) => byId.get(id))
-      .filter((t): t is Turn => !!t)
-      .map((t) => `- ${t.text}`),
-  ];
-  if (question.clarifications.length > 0) {
-    lines.push(
-      '',
-      'Clarifications:',
-      ...question.clarifications.map((c) => `- ${speakerName(c.speaker)}: ${c.text}`),
-    );
-  }
-  lines.push(
+    ...phrases.map((s) => `- ${s.text}`),
     '',
     'Recent conversation:',
     ...turns
       .slice(-RECENT_TURNS)
       .map((t) => `[${formatSessionTime(t.tStart)}] ${speakerName(t.speaker)}: ${t.text}`),
-  );
+  ];
   return lines.join('\n');
 }
 

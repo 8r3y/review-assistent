@@ -44,6 +44,8 @@ export interface AssistantConfig {
   settings: AssistantSettings;
   /** The owner's notes about themselves/their work, used for answers. */
   ownerContext: string;
+  /** Owner phrases that make a question of the last remote turns and answer it. */
+  triggerPhrases: string[];
 }
 
 export interface PipelineSessionConfig {
@@ -63,9 +65,11 @@ export type MainToPipeline =
   | { type: 'session:start'; config: PipelineSessionConfig }
   | { type: 'session:stop' }
   | { type: 'diarization:set-threshold'; threshold: number }
-  /** questionId null: first turn the last remote turns into a question, then answer it. */
+  /** questionId null: extend the last question with the remote phrases said since, then answer it. */
   | { type: 'assistant:answer'; questionId: string | null }
+  /** Makes a question of the remote phrases said since the previous mark and answers it. */
   | { type: 'assistant:mark-question' }
+  | { type: 'assistant:set-triggers'; phrases: string[] }
   | { type: 'assistant:dismiss'; questionId: string }
   /** Carries the capture → pipeline MessagePort in `ports[0]`. */
   | { type: 'audio-port' };
@@ -81,7 +85,7 @@ export type PipelineToMain =
   /** Re-clustering changed the speaker of an earlier segment. */
   | { type: 'relabel'; segmentId: string; speaker: SpeakerId }
   | { type: 'turns'; upserts: Turn[]; removed: string[] }
-  /** focus: the owner asked for this question (hotkey), the overlay should switch to it. */
+  /** focus: the owner asked for this question (hotkey, trigger phrase), the overlay should switch to it. */
   | { type: 'question'; question: Question; focus: boolean }
   | { type: 'assistant-error'; message: string }
   | { type: 'session:stopped' };

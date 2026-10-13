@@ -86,7 +86,7 @@ export class TrayController {
       },
       ...(problem ? [{ label: `⚠ ${truncate(problem, 60)}`, enabled: false }] : []),
       {
-        label: 'Ответить на текущий вопрос',
+        label: 'Дополнить последний вопрос и ответить',
         enabled: running,
         ...shortcut('question.answer'),
         click: a.answerQuestion,

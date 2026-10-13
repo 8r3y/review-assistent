@@ -89,6 +89,8 @@ export interface AppState {
   assistant: AssistantSettings & {
     keys: Record<LlmProviderId, boolean>;
     endpoints: Record<LlmProviderId, string | null>;
+    /** Owner phrases that make a question of the last remote turns and answer it. */
+    triggerPhrases: string[];
     error: string | null;
   };
   /** The question shown in the overlay and targeted by hotkeys. */
@@ -132,7 +134,7 @@ export interface InvokeMap {
   'transcript:get': () => Segment[];
   'turns:get': () => Turn[];
   'questions:get': () => Question[];
-  /** null → the current question; with none, the last remote turns become a question first. */
+  /** An id re-answers that question; null extends the last question with the phrases said since. */
   'questions:answer': (questionId: string | null) => void;
   'questions:dismiss': (questionId: string) => void;
   'questions:select': (questionId: string) => void;
@@ -144,6 +146,8 @@ export interface InvokeMap {
   'assistant:set-key': (provider: LlmProviderId, key: string | null) => void;
   /** null or empty → the official endpoint. Resolves with an error message for an invalid URL. */
   'assistant:set-endpoint': (provider: LlmProviderId, url: string | null) => string | null;
+  /** Comma-separated phrases; applies to the running session too. Resolves with the saved list. */
+  'assistant:set-triggers': (text: string) => string[];
   'assistant:get-context': () => string;
   'assistant:set-context': (context: string) => void;
   /** Screens and windows with previews, for the source picker. */
@@ -199,6 +203,7 @@ export const INVOKE_CHANNELS = [
   'assistant:set-route',
   'assistant:set-key',
   'assistant:set-endpoint',
+  'assistant:set-triggers',
   'assistant:get-context',
   'assistant:set-context',
   'video:list-sources',

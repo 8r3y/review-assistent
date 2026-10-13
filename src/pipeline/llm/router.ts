@@ -4,7 +4,7 @@ import { ClaudeBackend } from './claude';
 import { GeminiBackend } from './gemini';
 import type { LlmBackend, LlmProvider } from './provider';
 
-const TASK_NAMES: Record<LlmTask, string> = { analyze: 'поиска вопросов', answer: 'ответов' };
+const TASK_NAMES: Record<LlmTask, string> = { analyze: 'вопросов и саммари', answer: 'ответов' };
 
 export interface LlmSetup {
   provider: LlmProvider | null;

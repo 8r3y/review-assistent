@@ -65,15 +65,21 @@ export class PipelineSession {
       now: () => this.clock.now(),
       provider: llm.provider,
       unavailable: llm.unavailable,
+      triggerPhrases: config.assistant.triggerPhrases,
     });
   }
 
+  /** null → extend the last question with the phrases said since and answer it again. */
   answer(questionId: string | null): void {
-    void this.assistant.answer(questionId);
+    void (questionId ? this.assistant.answer(questionId) : this.assistant.extend());
   }
 
   markQuestion(): void {
-    void this.assistant.markQuestion();
+    void this.assistant.mark();
+  }
+
+  setTriggerPhrases(phrases: string[]): void {
+    this.assistant.setTriggerPhrases(phrases);
   }
 
   dismissQuestion(questionId: string): void {
@@ -142,7 +148,12 @@ export class PipelineSession {
       sttDiarize: isSystem && !this.embedder,
       toIso: (ms) => this.clock.toIso(ms),
       callbacks: {
-        onPartial: (partial) => this.send({ type: 'partial', partial }),
+        onPartial: (partial) => {
+          this.send({ type: 'partial', partial });
+          // Partials catch a trigger phrase while the owner keeps talking.
+          if (channel === 'mic') this.assistant.ownerSpeech(partial.text, partial.tStart);
+          else this.assistant.remotePartial(partial.text, partial.tStart);
+        },
         onFinal: (segment) => this.publish(segment),
         onSttStatus: (status, error) => this.send({ type: 'stt-status', channel, status, error }),
         onVadEvent: () => {},
@@ -166,6 +177,7 @@ export class PipelineSession {
     this.send({ type: 'final', segment: final });
     this.write({ type: 'segment', ...final });
     this.assistant.addSegment(final);
+    if (final.channel === 'mic') this.assistant.ownerSpeech(final.text, final.tStart);
   }
 
   /** Assigns the speaker from the local diarizer and publishes corrections of earlier segments. */

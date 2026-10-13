@@ -3,6 +3,7 @@ import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import {
   DEFAULT_MODELS,
+  DEFAULT_TRIGGER_PHRASES,
   type AssistantSettings,
   type LlmProviderId,
   type LlmRoute,
@@ -25,6 +26,8 @@ export interface Settings {
   assistantModels: Record<LlmTask, Partial<Record<LlmProviderId, string>>>;
   /** Custom API base URL per provider (gateways such as new-api); absent → official endpoint. */
   assistantEndpoints: Partial<Record<LlmProviderId, string>>;
+  /** Owner phrases that make a question of the last remote turns and answer it; empty → off. */
+  triggerPhrases: string[];
 }
 
 export const DEFAULT_HOTKEYS: HotkeyBindings = {
@@ -61,6 +64,7 @@ const DEFAULTS: Settings = {
   },
   assistantModels: { analyze: {}, answer: {} },
   assistantEndpoints: {},
+  triggerPhrases: DEFAULT_TRIGGER_PHRASES,
 };
 
 /** Settings written before per-task providers stored flat Claude-only fields. */
@@ -128,6 +132,9 @@ export class SettingsStore {
         ) as HotkeyBindings,
         assistant: loadAssistant(stored.assistant),
         assistantEndpoints: { ...stored.assistantEndpoints },
+        triggerPhrases: Array.isArray(stored.triggerPhrases)
+          ? stored.triggerPhrases.filter((p): p is string => typeof p === 'string')
+          : DEFAULTS.triggerPhrases,
         assistantModels: {
           analyze: { ...stored.assistantModels?.analyze },
           answer: { ...stored.assistantModels?.answer },

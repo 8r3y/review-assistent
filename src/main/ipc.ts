@@ -73,6 +73,7 @@ export function registerIpc(app: AppController): void {
     'assistant:set-key': (_e, provider, key) => {
       if (isProvider(provider)) app.setAssistantKey(provider, asString(key) ?? null);
     },
+    'assistant:set-triggers': (_e, text) => app.setTriggerPhrases(asString(text) ?? ''),
     'assistant:get-context': () => app.getOwnerContext(),
     'assistant:set-context': (_e, text) => app.setOwnerContext(asString(text) ?? ''),
     'video:list-sources': () => app.listVideoSources(),

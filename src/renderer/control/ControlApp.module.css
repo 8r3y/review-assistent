@@ -300,12 +300,6 @@ select {
   line-height: 1.4;
 }
 
-.clarifications {
-  margin: 6px 0 0;
-  padding-left: 18px;
-  color: var(--muted);
-}
-
 .answerText {
   margin-top: 8px;
   padding-top: 8px;

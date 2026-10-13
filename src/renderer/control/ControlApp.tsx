@@ -25,8 +25,8 @@ const HOTKEY_LABELS: Record<HotkeyAction, string> = {
   'video.toggle': 'Видеозапись старт/стоп',
   screenshot: 'Скриншот',
   marker: 'Маркер',
-  'question.answer': 'Ответить на текущий вопрос',
-  'question.mark': 'Это вопрос (последние фразы собеседника)',
+  'question.answer': 'Дополнить последний вопрос новыми фразами и ответить',
+  'question.mark': 'Вопрос из фраз собеседника после прошлого вопроса + ответ',
   'question.prev': 'Предыдущий вопрос',
   'question.next': 'Следующий вопрос',
   'question.dismiss': 'Отклонить текущий вопрос',
@@ -298,16 +298,18 @@ function AssistantCard({ state }: { state: AppState }): React.JSX.Element {
           />
         </div>
       ))}
-      <RouteRow task="analyze" label="Поиск вопросов" route={assistant.analyze} keys={assistant.keys} />
+      <RouteRow task="analyze" label="Вопрос, саммари" route={assistant.analyze} keys={assistant.keys} />
       <RouteRow task="answer" label="Ответы" route={assistant.answer} keys={assistant.keys} />
       <p className={styles.muted}>
         Эндпоинт используется ровно как указан — например, адрес совместимого шлюза
         (https://api.fastypass.com:8444). Через шлюз идут ключ и текст разговора.
       </p>
       <p className={styles.muted}>
-        Провайдер выбирается для каждой задачи отдельно, например быстрый Gemini Flash-Lite для поиска
-        вопросов и Claude для ответов. Изменения применяются со следующей сессии.
+        Провайдер выбирается для каждой задачи отдельно, например быстрый Gemini Flash-Lite для формулировки
+        вопроса и саммари реплик и Claude для ответов. Изменения применяются со следующей сессии.
       </p>
+      {/* key: reset the field when the saved list changes */}
+      <TriggerPhrasesRow key={assistant.triggerPhrases.join(', ')} phrases={assistant.triggerPhrases} />
       <label className={styles.column}>
         <span className={styles.label}>Мой контекст — о себе, проекте, опыте; используется в ответах</span>
         <textarea
@@ -335,6 +337,35 @@ function AssistantCard({ state }: { state: AppState }): React.JSX.Element {
       </div>
       {assistant.error && <p className={styles.bad}>{assistant.error}</p>}
     </section>
+  );
+}
+
+function TriggerPhrasesRow({ phrases }: { phrases: string[] }): React.JSX.Element {
+  const saved = phrases.join(', ');
+  const [value, setValue] = useState(saved);
+  const dirty = value.trim() !== saved;
+  const save = (): void => void window.api.invoke('assistant:set-triggers', value);
+  return (
+    <label className={styles.column}>
+      <span className={styles.label}>
+        Ключевые фразы через запятую — сказанные в начале вашей реплики, делают вопрос из последних фраз
+        собеседника и сразу генерируют ответ. Пусто — выключено. Применяется сразу.
+      </span>
+      <div className={styles.row}>
+        <input
+          className={styles.wide}
+          value={value}
+          placeholder="хороший вопрос, понял ваш вопрос"
+          onChange={(e) => setValue(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' && dirty) save();
+          }}
+        />
+        <button className={styles.secondary} disabled={!dirty} onClick={save}>
+          Сохранить
+        </button>
+      </div>
+    </label>
   );
 }
 

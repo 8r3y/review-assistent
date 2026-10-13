@@ -31,10 +31,7 @@ const response = (text: string, finishReason = FinishReason.STOP): Partial<Gener
 
 describe('GeminiBackend', () => {
   it('requests JSON with the analysis schema and the route thinking level, and validates the result', async () => {
-    const result = {
-      summaries: [],
-      ops: [{ op: 'create', questionId: null, text: 'Вопрос?', turnIds: ['t1'] }],
-    };
+    const result = { summaries: [{ turnId: 't1', summary: 'Суть' }], question: 'Вопрос?' };
     const { backend: b, calls } = backend({ generateContent: async () => response(JSON.stringify(result)) });
     await expect(b.analyze('{}', route)).resolves.toEqual(result);
     const config = (calls[0] as { model: string; config: Record<string, unknown> }).config;
@@ -44,7 +41,7 @@ describe('GeminiBackend', () => {
   });
 
   it('rejects output that does not match the schema', async () => {
-    const { backend: b } = backend({ generateContent: async () => response('{"ops": "nope"}') });
+    const { backend: b } = backend({ generateContent: async () => response('{"question": 42}') });
     await expect(b.analyze('{}', route)).rejects.toThrow('Gemini вернул ответ не по схеме');
   });
 

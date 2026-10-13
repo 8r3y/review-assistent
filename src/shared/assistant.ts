@@ -18,13 +18,7 @@ export interface Turn {
   summary: string | null;
 }
 
-export type QuestionStatus = 'open' | 'answering' | 'answered' | 'closed' | 'dismissed';
-
-export interface Clarification {
-  turnId: string;
-  speaker: SpeakerId;
-  text: string;
-}
+export type QuestionStatus = 'open' | 'answering' | 'answered' | 'dismissed';
 
 export interface Answer {
   text: string;
@@ -32,29 +26,23 @@ export interface Answer {
   error: string | null;
 }
 
+/**
+ * A question the owner marked (hotkey or trigger phrase). It covers the remote phrases between the
+ * previous mark and this one; extending it adds the phrases said since.
+ */
 export interface Question {
   id: string;
-  /** Consolidated wording, rewritten as the question unfolds over several phrases. */
+  /** Wording the LLM made of the source phrases. */
   text: string;
   askedBy: SpeakerId;
   tStart: number;
   tEnd: number;
-  sourceTurnIds: string[];
-  clarifications: Clarification[];
+  /** Remote transcript segments the question was made of. */
+  sourceSegmentIds: string[];
   status: QuestionStatus;
   answer: Answer | null;
   /** Session ms of the last change. */
   updatedAt: number;
-}
-
-export type QuestionOpKind = 'create' | 'update' | 'clarify' | 'close';
-
-/** An operation the analyzer asks to apply to the question list. */
-export interface QuestionOp {
-  op: QuestionOpKind;
-  questionId: string | null;
-  text: string | null;
-  turnIds: string[];
 }
 
 export type Effort = 'low' | 'medium' | 'high';
@@ -91,3 +79,31 @@ export const DEFAULT_MODELS: Record<LlmProviderId, Record<LlmTask, string>> = {
   // 3.8 Flash is the strongest Flash model.
   google: { analyze: 'gemini-3.5-flash-lite', answer: 'gemini-3.8-flash' },
 };
+
+/** Owner phrases that make a question of the last remote turns and answer it right away. */
+export const DEFAULT_TRIGGER_PHRASES = [
+  'хороший вопрос',
+  'отличный вопрос',
+  'интересный вопрос',
+  'понял ваш вопрос',
+  'понял вопрос',
+  'дайте подумать',
+  'good question',
+  'great question',
+  'let me think',
+];
+
+/** Splits the comma-separated list typed in settings into trimmed phrases, without empty ones and repeats. */
+export function parseTriggerPhrases(text: string): string[] {
+  const phrases = text
+    .split(',')
+    .map((p) => p.trim().replace(/\s+/g, ' '))
+    .filter((p) => /[\p{L}\p{N}]/u.test(p));
+  const seen = new Set<string>();
+  return phrases.filter((p) => {
+    const key = p.toLowerCase().replace(/ё/g, 'е');
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
