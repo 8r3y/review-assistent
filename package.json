@@ -1,6 +1,6 @@
 {
   "name": "review-assistent",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "description": "Desktop assistant for web conferences: realtime transcription, turn summaries, capture-protected overlay",
   "author": "Andrey Potapov <mind_art@mail.ru>",

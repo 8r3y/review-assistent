@@ -312,13 +312,14 @@ export class AppController {
       }));
     } catch (e) {
       const error = e instanceof Error ? e.message : String(e);
-      await this.stopSession();
+      await this.stopSession({ openFolder: false });
       this.store.update((s) => ({ ...s, capture: { status: 'error', error } }));
     }
   }
 
-  async stopSession(): Promise<void> {
-    const status = this.store.get().session.status;
+  /** @param openFolder show the finished session's files (not when the session failed to start). */
+  async stopSession({ openFolder = true } = {}): Promise<void> {
+    const { status, dir } = this.store.get().session;
     if (status === 'idle' || status === 'stopping') return;
     this.store.update((s) => ({ ...s, session: { ...s.session, status: 'stopping' } }));
     await this.stopVideo();
@@ -339,6 +340,8 @@ export class AppController {
       video: { ...s.video, status: 'idle', startedAt: null },
       stt: { ...s.stt, status: { mic: 'off', system: 'off' } },
     }));
+    // After the files are finalized: the videos are complete by now.
+    if (openFolder && dir) void shell.openPath(dir);
   }
 
   toggleSession(): void {
