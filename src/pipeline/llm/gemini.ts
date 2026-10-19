@@ -9,7 +9,7 @@ import type { Effort, LlmRoute } from '@shared/assistant';
 import { ANALYZE_SYSTEM, ANSWER_SYSTEM, ownerContextBlock } from '../assistant/prompts';
 import { ANALYSIS_JSON_SCHEMA, AnalysisSchema } from './analysis-schema';
 import { LlmError, type AnalysisResult, type AnswerRequest, type LlmBackend } from './provider';
-import { isNetworkError, retryingFetch } from './retry-fetch';
+import { isNetworkError, networkCause, retryingFetch } from './retry-fetch';
 
 const RETRY = { attempts: 3, initialDelay: 0.5, maxDelay: 4 };
 const ANALYZE_MAX_TOKENS = 8000;
@@ -131,14 +131,6 @@ function checkFinish(response: GenerateContentResponse): void {
   const reason = response.candidates?.[0]?.finishReason;
   if (reason && BLOCKED.has(reason)) throw new LlmError('Gemini отказался отвечать на этот запрос');
   if (reason === FinishReason.MAX_TOKENS) throw new LlmError('Ответ Gemini обрезан по лимиту токенов');
-}
-
-function networkCause(e: TypeError): string {
-  const cause = e.cause instanceof Error ? e.cause.message : '';
-  if (/TLS|socket disconnected|ECONNRESET/i.test(cause)) return 'соединение оборвано (TLS)';
-  if (/ENOTFOUND|EAI_AGAIN/i.test(cause)) return 'адрес не найден (DNS)';
-  if (/ETIMEDOUT|timeout/i.test(cause)) return 'таймаут';
-  return cause || e.message;
 }
 
 function safeJson(text: string): unknown {

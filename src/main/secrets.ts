@@ -2,7 +2,7 @@ import { app, safeStorage } from 'electron';
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 
-export type SecretName = 'deepgramApiKey' | 'anthropicApiKey' | 'googleApiKey';
+export type SecretName = 'deepgramApiKey' | 'anthropicApiKey' | 'googleApiKey' | 'openaiApiKey';
 
 /** API keys encrypted with the OS keychain (DPAPI on Windows) and stored in userData. */
 export class SecretStore {

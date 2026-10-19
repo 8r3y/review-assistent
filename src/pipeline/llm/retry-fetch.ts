@@ -32,3 +32,12 @@ export function retryingFetch(
     }
   };
 }
+
+/** Short user-facing reason of a network failure. */
+export function networkCause(e: TypeError): string {
+  const cause = e.cause instanceof Error ? e.cause.message : '';
+  if (/TLS|socket disconnected|ECONNRESET/i.test(cause)) return 'соединение оборвано (TLS)';
+  if (/ENOTFOUND|EAI_AGAIN/i.test(cause)) return 'адрес не найден (DNS)';
+  if (/ETIMEDOUT|timeout/i.test(cause)) return 'таймаут';
+  return cause || e.message;
+}

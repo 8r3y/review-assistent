@@ -22,3 +22,16 @@ export const ANALYSIS_JSON_SCHEMA = {
   },
   required: ['summaries', 'question'],
 } as const;
+
+/** For OpenAI strict structured outputs: every object closed, every property required. */
+export const ANALYSIS_STRICT_JSON_SCHEMA = {
+  ...ANALYSIS_JSON_SCHEMA,
+  additionalProperties: false,
+  properties: {
+    ...ANALYSIS_JSON_SCHEMA.properties,
+    summaries: {
+      ...ANALYSIS_JSON_SCHEMA.properties.summaries,
+      items: { ...ANALYSIS_JSON_SCHEMA.properties.summaries.items, additionalProperties: false },
+    },
+  },
+} as const;

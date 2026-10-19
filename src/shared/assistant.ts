@@ -51,11 +51,13 @@ export interface Question {
 
 export type Effort = 'low' | 'medium' | 'high';
 
-export type LlmProviderId = 'anthropic' | 'google';
+/** An API family: the official service or any gateway speaking the same protocol. */
+export type LlmProviderId = 'anthropic' | 'google' | 'openai';
 
 export const LLM_PROVIDERS: { id: LlmProviderId; label: string }[] = [
-  { id: 'anthropic', label: 'Claude (Anthropic)' },
-  { id: 'google', label: 'Gemini (Google AI)' },
+  { id: 'anthropic', label: 'Anthropic' },
+  { id: 'google', label: 'Google' },
+  { id: 'openai', label: 'OpenAI' },
 ];
 
 /** Which provider, model and reasoning effort serve one task. */
@@ -74,6 +76,8 @@ export type AssistantSettings = Record<LlmTask, LlmRoute>;
 export const DEFAULT_ENDPOINTS: Record<LlmProviderId, string> = {
   anthropic: 'https://api.anthropic.com',
   google: 'https://generativelanguage.googleapis.com',
+  // Chat Completions paths are appended to it, so it includes /v1 (as in OpenAI-compatible gateways).
+  openai: 'https://api.openai.com/v1',
 };
 
 /** Model suggested when a task is switched to a provider. */
@@ -82,6 +86,7 @@ export const DEFAULT_MODELS: Record<LlmProviderId, Record<LlmTask, string>> = {
   // 3.5 Flash-Lite answers analysis requests in ~1–2 s (3.1 Flash-Lite took 10–30 s under load);
   // 3.8 Flash is the strongest Flash model.
   google: { analyze: 'gemini-3.5-flash-lite', answer: 'gemini-3.8-flash' },
+  openai: { analyze: 'gpt-5-mini', answer: 'gpt-5' },
 };
 
 /** Owner phrases that make a question of the last remote turns and answer it right away. */

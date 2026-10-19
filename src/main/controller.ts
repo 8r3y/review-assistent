@@ -14,6 +14,7 @@ import {
 } from '@shared/ipc';
 import {
   DEFAULT_MODELS,
+  LLM_PROVIDERS,
   type LlmProviderId,
   type LlmRoute,
   type LlmTask,
@@ -52,6 +53,7 @@ const VIDEO_OPTIONS: VideoStartOptions = {
 const LLM_SECRETS: Record<LlmProviderId, SecretName> = {
   anthropic: 'anthropicApiKey',
   google: 'googleApiKey',
+  openai: 'openaiApiKey',
 };
 
 /** Wires windows, hotkeys, tray, session, capture and pipeline around the shared AppStore. */
@@ -282,7 +284,7 @@ export class AppController {
         diarization: { ...diarization, modelPath: modelPath('speaker_eres2net_base_16k.onnx') },
         stt: { provider: 'deepgram', apiKey, ...stt },
         assistant: {
-          keys: { anthropic: this.secrets.get('anthropicApiKey'), google: this.secrets.get('googleApiKey') },
+          keys: perProvider((id) => this.secrets.get(LLM_SECRETS[id])),
           endpoints: this.llmEndpoints(),
           settings: assistant,
           ownerContext: readOwnerContext(),
@@ -449,11 +451,11 @@ export class AppController {
 
   private llmEndpoints(): Record<LlmProviderId, string | null> {
     const stored = this.settings.get().assistantEndpoints;
-    return { anthropic: stored.anthropic ?? null, google: stored.google ?? null };
+    return perProvider((id) => stored[id] ?? null);
   }
 
   private llmKeyFlags(): Record<LlmProviderId, boolean> {
-    return { anthropic: this.secrets.has('anthropicApiKey'), google: this.secrets.has('googleApiKey') };
+    return perProvider((id) => this.secrets.has(LLM_SECRETS[id]));
   }
 
   setTriggerPhrases(text: string): string[] {
@@ -607,6 +609,10 @@ export class AppController {
     if (this.store.get().pipeline.alive === alive) return;
     this.store.update((s) => ({ ...s, pipeline: { alive } }));
   }
+}
+
+function perProvider<T>(value: (id: LlmProviderId) => T): Record<LlmProviderId, T> {
+  return Object.fromEntries(LLM_PROVIDERS.map(({ id }) => [id, value(id)])) as Record<LlmProviderId, T>;
 }
 
 function modelPath(file: string): string {

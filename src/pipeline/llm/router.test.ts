@@ -7,24 +7,24 @@ const settings: AssistantSettings = {
   answer: { provider: 'anthropic', model: 'claude-opus-5-5', effort: 'low' },
 };
 
-const NO_ENDPOINTS = { anthropic: null, google: null };
+const NO_ENDPOINTS = { anthropic: null, google: null, openai: null };
 
 describe('createLlm', () => {
   it('names the missing key per task', () => {
     const setup = createLlm({
-      keys: { anthropic: 'k', google: null },
+      keys: { anthropic: 'k', google: null, openai: null },
       settings,
       ownerContext: '',
       triggerPhrases: [],
       endpoints: NO_ENDPOINTS,
     });
     expect(setup.provider).toBeNull();
-    expect(setup.unavailable).toBe('Нет API-ключа: Gemini (Google AI) для вопросов и саммари');
+    expect(setup.unavailable).toBe('Нет API-ключа: Google для вопросов и саммари');
   });
 
   it('builds a provider when every routed vendor has a key', () => {
     const setup = createLlm({
-      keys: { anthropic: 'k1', google: 'k2' },
+      keys: { anthropic: 'k1', google: 'k2', openai: null },
       settings,
       ownerContext: 'notes',
       triggerPhrases: [],
@@ -37,7 +37,7 @@ describe('createLlm', () => {
   it('needs only the keys of providers actually routed', () => {
     const allGoogle: AssistantSettings = { ...settings, answer: { ...settings.answer, provider: 'google' } };
     const setup = createLlm({
-      keys: { anthropic: null, google: 'k' },
+      keys: { anthropic: null, google: 'k', openai: null },
       settings: allGoogle,
       ownerContext: '',
       triggerPhrases: [],

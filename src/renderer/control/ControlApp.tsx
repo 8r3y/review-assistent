@@ -309,27 +309,15 @@ function AssistantCard({ state }: { state: AppState }): React.JSX.Element {
   return (
     <section className={styles.card}>
       <h2>Ассистент (LLM)</h2>
-      {LLM_PROVIDERS.map((p) => (
-        <div key={p.id}>
-          <ApiKeyRow provider={p.id} label={p.label} saved={assistant.keys[p.id]} />
-          {/* key: reset the field when the saved endpoint changes */}
-          <EndpointRow
-            key={assistant.endpoints[p.id] ?? ''}
-            provider={p.id}
-            endpoint={assistant.endpoints[p.id]}
-          />
-        </div>
-      ))}
+      <ProviderTabs assistant={assistant} />
+      <div className={styles.divider} />
       <RouteRow task="analyze" label="Вопрос, саммари" route={assistant.analyze} keys={assistant.keys} />
       <RouteRow task="answer" label="Ответы" route={assistant.answer} keys={assistant.keys} />
       <p className={styles.muted}>
-        Эндпоинт используется ровно как указан — например, адрес совместимого шлюза
-        (https://api.fastypass.com:8444). Через шлюз идут ключ и текст разговора.
+        Провайдер и модель выбираются для каждой задачи отдельно, например быстрая модель для формулировки
+        вопроса и саммари реплик и сильная для ответов. Изменения применяются со следующей сессии.
       </p>
-      <p className={styles.muted}>
-        Провайдер выбирается для каждой задачи отдельно, например быстрый Gemini Flash-Lite для формулировки
-        вопроса и саммари реплик и Claude для ответов. Изменения применяются со следующей сессии.
-      </p>
+      <div className={styles.divider} />
       {/* key: reset the field when the saved list changes */}
       <TriggerPhrasesRow key={assistant.triggerPhrases.join(', ')} phrases={assistant.triggerPhrases} />
       <label className={styles.column}>
@@ -440,59 +428,117 @@ function TriggerPhrasesRow({ phrases }: { phrases: string[] }): React.JSX.Elemen
   );
 }
 
-function EndpointRow({
+/** Per-API-family settings in tabs: where requests go and with which key. */
+function ProviderTabs({ assistant }: { assistant: AppState['assistant'] }): React.JSX.Element {
+  const [tab, setTab] = useState<LlmProviderId>(assistant.answer.provider);
+  return (
+    <>
+      <div className={styles.tabs} role="tablist">
+        {LLM_PROVIDERS.map((p) => (
+          <button
+            key={p.id}
+            role="tab"
+            aria-selected={tab === p.id}
+            className={tab === p.id ? styles.tabActive : styles.tab}
+            onClick={() => setTab(p.id)}
+          >
+            {p.label}-совместимые
+            {assistant.keys[p.id] && (
+              <span className={styles.ok} title="ключ сохранён">
+                ●
+              </span>
+            )}
+          </button>
+        ))}
+      </div>
+      {/* key: reset the fields when switching tabs or when the saved endpoint changes */}
+      <EndpointChoice
+        key={`${tab}:${assistant.endpoints[tab] ?? ''}`}
+        provider={tab}
+        endpoint={assistant.endpoints[tab]}
+      />
+      <ApiKeyRow key={tab} provider={tab} saved={assistant.keys[tab]} />
+      <p className={styles.muted}>{PROVIDER_NOTES[tab]}</p>
+    </>
+  );
+}
+
+const PROVIDER_NOTES: Record<LlmProviderId, string> = {
+  anthropic:
+    'Messages API: Claude или совместимый шлюз (например, https://api.fastypass.com:8444). Адрес — без /v1.',
+  google: 'Gemini API или совместимый шлюз. Адрес — без версии в пути.',
+  openai:
+    'Chat Completions: OpenAI, OpenRouter, vLLM, Ollama, LiteLLM… Адрес — с версией (…/v1), к нему добавляется /chat/completions.',
+};
+
+function EndpointChoice({
   provider,
   endpoint,
 }: {
   provider: LlmProviderId;
   endpoint: string | null;
 }): React.JSX.Element {
+  const [custom, setCustom] = useState(endpoint !== null);
   const [value, setValue] = useState(endpoint ?? '');
   const [error, setError] = useState<string | null>(null);
   const dirty = value.trim() !== (endpoint ?? '');
   const save = (url: string | null): void =>
     void window.api.invoke('assistant:set-endpoint', provider, url).then(setError);
   return (
-    <div className={styles.row}>
-      <span className={styles.label}>Эндпоинт</span>
-      <input
-        className={styles.wide}
-        placeholder={`${DEFAULT_ENDPOINTS[provider]} (официальный)`}
-        value={value}
-        onChange={(e) => {
-          setValue(e.target.value);
-          setError(null);
-        }}
-        onKeyDown={(e) => {
-          if (e.key === 'Enter' && dirty) save(value);
-        }}
-      />
-      <button className={styles.secondary} disabled={!dirty} onClick={() => save(value)}>
-        Сохранить
-      </button>
-      {endpoint && (
-        <button className={styles.secondary} onClick={() => save(null)}>
-          Официальный
+    <>
+      <div className={styles.row}>
+        <span className={styles.label}>Эндпоинт</span>
+        <label>
+          <input
+            type="radio"
+            checked={!custom}
+            onChange={() => {
+              setCustom(false);
+              setError(null);
+              if (endpoint) save(null);
+            }}
+          />
+          Официальный <span className={styles.muted}>{DEFAULT_ENDPOINTS[provider]}</span>
+        </label>
+      </div>
+      <div className={styles.row}>
+        <span className={styles.label} />
+        <label>
+          <input type="radio" checked={custom} onChange={() => setCustom(true)} />
+          Свой
+        </label>
+        <input
+          className={styles.wide}
+          disabled={!custom}
+          placeholder="https://gateway.example.com"
+          value={value}
+          onChange={(e) => {
+            setValue(e.target.value);
+            setError(null);
+          }}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' && dirty && value.trim()) save(value);
+          }}
+        />
+        <button
+          className={styles.secondary}
+          disabled={!custom || !dirty || !value.trim()}
+          onClick={() => save(value)}
+        >
+          Сохранить
         </button>
-      )}
-      {error && <span className={styles.bad}>{error}</span>}
-    </div>
+      </div>
+      {error && <p className={styles.bad}>{error}</p>}
+      {custom && endpoint && <p className={styles.muted}>Через этот адрес идут ключ и текст разговора.</p>}
+    </>
   );
 }
 
-function ApiKeyRow({
-  provider,
-  label,
-  saved,
-}: {
-  provider: LlmProviderId;
-  label: string;
-  saved: boolean;
-}): React.JSX.Element {
+function ApiKeyRow({ provider, saved }: { provider: LlmProviderId; saved: boolean }): React.JSX.Element {
   const [key, setKey] = useState('');
   return (
     <div className={styles.row}>
-      <span className={styles.label}>Ключ {label}</span>
+      <span className={styles.label}>API-ключ</span>
       {saved ? (
         <>
           <span className={styles.ok}>сохранён (зашифрован)</span>

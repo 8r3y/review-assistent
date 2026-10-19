@@ -2,7 +2,17 @@ import { LLM_PROVIDERS, type LlmProviderId, type LlmTask } from '@shared/assista
 import type { AssistantConfig } from '@shared/pipeline-protocol';
 import { ClaudeBackend } from './claude';
 import { GeminiBackend } from './gemini';
+import { OpenAiBackend } from './openai';
 import type { LlmBackend, LlmProvider } from './provider';
+
+const BACKENDS: Record<
+  LlmProviderId,
+  (apiKey: string, ownerContext: string, endpoint: string | null) => LlmBackend
+> = {
+  anthropic: (...args) => new ClaudeBackend(...args),
+  google: (...args) => new GeminiBackend(...args),
+  openai: (...args) => new OpenAiBackend(...args),
+};
 
 const TASK_NAMES: Record<LlmTask, string> = { analyze: 'вопросов и саммари', answer: 'ответов' };
 
@@ -27,10 +37,7 @@ export function createLlm(config: AssistantConfig): LlmSetup {
     if (!b) {
       const key = keys[id]!;
       const endpoint = endpoints[id];
-      b =
-        id === 'anthropic'
-          ? new ClaudeBackend(key, ownerContext, endpoint)
-          : new GeminiBackend(key, ownerContext, endpoint);
+      b = BACKENDS[id](key, ownerContext, endpoint);
       backends.set(id, b);
     }
     return b;
