@@ -1,41 +1,63 @@
 import {
+  BrowserWindow,
   desktopCapturer,
   session,
-  type BrowserWindow,
   type DesktopCapturerSource,
   type MessagePortMain,
 } from 'electron';
 import type {
   CaptureStartOptions,
   CaptureStartResult,
+  ScreenshotResult,
   VideoSource,
   VideoStartOptions,
   VideoStartResult,
 } from '@shared/ipc';
+import { screenAccessHint } from './platform';
 
 const STOP_TIMEOUT_MS = 5000;
 
 /** The source the next video-only getDisplayMedia() request records; set by CaptureHost.startVideo. */
 let pendingVideoSource: { id: string; name: string | null } | null = null;
 
+export interface DisplayMediaOptions {
+  /** Wayland: sources come from the portal dialog, see PlatformInfo.portalCapture. */
+  portal: boolean;
+  /** Portal mode: the user picked a source in the dialog. */
+  onPortalSource: (name: string) => void;
+}
+
 /**
- * Answers getDisplayMedia() without a picker:
- * - audio requests get system audio (WASAPI loopback on Windows); the capture window drops their video track;
- * - video-only requests get the screen or window picked for recording.
+ * Answers getDisplayMedia() without the app's own picker:
+ * - audio requests get system audio (WASAPI loopback on Windows, CoreAudio tap on macOS, the PulseAudio
+ *   monitor on Linux); the capture window drops their video track. In portal mode that track is the capture
+ *   page itself: a screen would open the portal dialog on every session start;
+ * - video-only requests get the screen or window picked for recording, in portal mode the one picked
+ *   in the dialog.
  */
-export function installDisplayMediaHandler(): void {
+export function installDisplayMediaHandler({ portal, onPortalSource }: DisplayMediaOptions): void {
   session.defaultSession.setDisplayMediaRequestHandler(
     (request, callback) => {
       const resolve = request.audioRequested
-        ? desktopCapturer.getSources({ types: ['screen'], thumbnailSize: NO_THUMBNAIL }).then((sources) => {
-            const screen = sources[0];
-            if (!screen) throw new Error('no screen source');
-            return { video: screen, audio: 'loopback' as const };
-          })
-        : findVideoSource(pendingVideoSource).then((video) => {
-            if (!video) throw new Error('video source not found');
-            return { video };
-          });
+        ? portal && request.frame
+          ? Promise.resolve({ video: request.frame, audio: 'loopback' as const })
+          : desktopCapturer.getSources({ types: ['screen'], thumbnailSize: NO_THUMBNAIL }).then((sources) => {
+              const screen = sources[0];
+              if (!screen) throw new Error('no screen source');
+              return { video: screen, audio: 'loopback' as const };
+            })
+        : portal
+          ? desktopCapturer
+              .getSources({ types: ['screen', 'window'], thumbnailSize: NO_THUMBNAIL })
+              .then(([picked]) => {
+                if (!picked) throw new Error('nothing picked');
+                onPortalSource(picked.name);
+                return { video: picked };
+              })
+          : findVideoSource(pendingVideoSource).then((video) => {
+              if (!video) throw new Error('video source not found');
+              return { video };
+            });
       resolve.then(callback).catch(() => callback({}));
     },
     { useSystemPicker: false },
@@ -59,7 +81,7 @@ export async function listVideoSources(): Promise<VideoSource[]> {
 }
 
 /** Screenshots are scaled down to fit this box (the model downsizes larger images anyway). */
-const SCREENSHOT_SIZE = { width: 1920, height: 1200 };
+export const SCREENSHOT_SIZE = { width: 1920, height: 1200 };
 
 /**
  * Captures the screen or window picked for video (null → the primary screen) as PNG.
@@ -67,8 +89,13 @@ const SCREENSHOT_SIZE = { width: 1920, height: 1200 };
  */
 export async function captureScreenshot(source: { id: string; name: string | null } | null): Promise<Buffer> {
   const found = await findVideoSource(source, SCREENSHOT_SIZE);
-  if (!found) throw new Error('Источник для скриншота не найден — выберите экран или окно заново');
-  if (found.thumbnail.isEmpty()) throw new Error('Не удалось снять источник — окно свёрнуто?');
+  if (!found) {
+    throw new Error(
+      screenAccessHint() ?? 'Источник для скриншота не найден — выберите экран или окно заново',
+    );
+  }
+  if (found.thumbnail.isEmpty())
+    throw new Error(screenAccessHint() ?? 'Не удалось снять источник — окно свёрнуто?');
   return found.thumbnail.toPNG();
 }
 
@@ -91,9 +118,17 @@ async function findVideoSource(
   );
 }
 
-/** desktopCapturer ids are `window:HANDLE:1` for this process's windows. */
+/**
+ * On Windows desktopCapturer ids are `window:HANDLE:1` for this process's windows; elsewhere they are
+ * told apart by the native handle.
+ */
 function isOwnWindow(id: string): boolean {
-  return id.startsWith('window:') && id.endsWith(':1');
+  if (!id.startsWith('window:')) return false;
+  if (id.endsWith(':1')) return true;
+  const handle = id.split(':')[1];
+  return BrowserWindow.getAllWindows().some(
+    (win) => !win.isDestroyed() && win.getMediaSourceId().split(':')[1] === handle,
+  );
 }
 
 /** Drives the hidden capture window (audio graph, PCM frames, audio and video recorders). */
@@ -136,6 +171,31 @@ export class CaptureHost {
       throw new Error(result.error ?? 'Запись видео не запустилась');
     }
     return { startedAt: result.startedAt, mimeType: result.mimeType };
+  }
+
+  /**
+   * Portal mode: a frame of the session's screen stream (the portal dialog opens on first use).
+   * Rejects with a user-facing message.
+   */
+  async screenshotFromSession(
+    options: VideoStartOptions,
+    maxSize: { width: number; height: number },
+  ): Promise<Buffer> {
+    const result = (await this.win.webContents.executeJavaScript(
+      `window.captureControl.screenshot(${JSON.stringify(options)}, ${JSON.stringify(maxSize)})`,
+      true,
+    )) as ScreenshotResult;
+    if (result.error || !result.png) throw new Error(result.error ?? 'Скриншот не получился');
+    return Buffer.from(result.png, 'base64');
+  }
+
+  /** Portal mode: opens the dialog to pick another source for the session. Rejects with a user-facing message. */
+  async pickSessionSource(options: VideoStartOptions): Promise<void> {
+    const result = (await this.win.webContents.executeJavaScript(
+      `window.captureControl.pickSource(${JSON.stringify(options)})`,
+      true,
+    )) as { error: string | null };
+    if (result.error) throw new Error(result.error);
   }
 
   async stopVideo(): Promise<void> {

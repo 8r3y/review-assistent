@@ -3,15 +3,18 @@ import type {
   CaptureControl,
   CaptureStartOptions,
   CaptureStartResult,
+  ScreenshotResult,
   VideoStartOptions,
   VideoStartResult,
 } from '@shared/ipc';
 import { AudioCapture } from './audio-capture';
+import { SessionSource } from './session-source';
 import { VideoCapture } from './video-capture';
 
 let pcmPort: MessagePort | null = null;
 let capture: AudioCapture | null = null;
 let video: VideoCapture | null = null;
+const sessionSource = new SessionSource();
 
 window.addEventListener('message', (event) => {
   if (event.source !== window || event.data !== 'capture:port') return;
@@ -37,6 +40,7 @@ const control: CaptureControl = {
     const current = capture;
     capture = null;
     await Promise.all([control.stopVideo(), current?.stop()]);
+    sessionSource.close();
   },
   async startVideo(options: VideoStartOptions): Promise<VideoStartResult> {
     await control.stopVideo();
@@ -45,7 +49,8 @@ const control: CaptureControl = {
       void control.stopVideo().then(() => window.api.invoke('capture:video-ended'));
     });
     try {
-      const { startedAt, mimeType } = await next.start(options);
+      const source = options.sessionSource ? await sessionSource.track(options) : null;
+      const { startedAt, mimeType } = await next.start(options, source);
       video = next;
       return { error: null, startedAt, mimeType };
     } catch (e) {
@@ -57,6 +62,21 @@ const control: CaptureControl = {
     const current = video;
     video = null;
     await current?.stop();
+  },
+  async screenshot(options, maxSize): Promise<ScreenshotResult> {
+    try {
+      return { error: null, png: await sessionSource.screenshot(options, maxSize) };
+    } catch (e) {
+      return { error: describeVideoError(e), png: null };
+    }
+  },
+  async pickSource(options): Promise<{ error: string | null }> {
+    try {
+      await sessionSource.reopen(options);
+      return { error: null };
+    } catch (e) {
+      return { error: describeVideoError(e) };
+    }
   },
 };
 

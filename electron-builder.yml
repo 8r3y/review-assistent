@@ -19,3 +19,19 @@ win:
 nsis:
   oneClick: false
   allowToChangeInstallationDirectory: true
+# Native modules (sherpa-onnx, ffmpeg) are installed for the build machine: build each OS and arch on itself.
+mac:
+  target: dmg
+  category: public.app-category.productivity
+  # Ad-hoc signature: runs locally, macOS asks for the permissions again after every rebuild.
+  # For distribution put 'Developer ID Application: …' here and enable notarization.
+  identity: '-'
+  hardenedRuntime: true
+  entitlements: build/entitlements.mac.plist
+  entitlementsInherit: build/entitlements.mac.plist
+  extendInfo:
+    NSMicrophoneUsageDescription: Распознавание вашей речи во время созвона.
+    NSAudioCaptureUsageDescription: Распознавание речи собеседников — системный звук созвона.
+linux:
+  target: AppImage
+  category: Office

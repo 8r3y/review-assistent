@@ -1,5 +1,6 @@
 import { BrowserWindow, screen, type Rectangle } from 'electron';
 import { OVERLAY_HANDLE_HEIGHT, OVERLAY_SCROLLBAR_WIDTH, type OverlayMode } from '@shared/ipc';
+import { IS_MAC } from '../platform';
 import { loadPage, preloadPath } from './load';
 
 export const MIN_OPACITY = 0.2;
@@ -15,7 +16,8 @@ export interface OverlayOptions {
 }
 
 /**
- * Transparent always-on-top overlay excluded from screen capture (WDA_EXCLUDEFROMCAPTURE on Windows).
+ * Transparent always-on-top overlay excluded from screen capture: WDA_EXCLUDEFROMCAPTURE on Windows,
+ * NSWindowSharingNone on macOS (ScreenCaptureKit-based capture ignores it), nothing on Linux.
  * In passthrough mode clicks go through the window, except over the top handle bar (to drag it) and the
  * scrollbar on the right edge (to scroll a long answer).
  */
@@ -40,10 +42,13 @@ export class OverlayWindow {
       skipTaskbar: true,
       focusable: false,
       alwaysOnTop: true,
+      // macOS: a non-activating panel floats over full-screen apps without taking focus.
+      ...(IS_MAC ? { type: 'panel' } : {}),
       webPreferences: { preload: preloadPath('overlay'), sandbox: false, contextIsolation: true },
     });
     this.win.setAlwaysOnTop(true, 'screen-saver');
-    this.win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+    // skipTransformProcessType: otherwise macOS turns the app into an accessory and drops its Dock icon.
+    this.win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true, skipTransformProcessType: true });
     this.win.setContentProtection(true);
     this.win.setOpacity(clampOpacity(options.opacity));
 

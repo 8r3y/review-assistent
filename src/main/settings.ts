@@ -30,21 +30,27 @@ export interface Settings {
   triggerPhrases: string[];
 }
 
+/**
+ * Ctrl+Alt on Windows and Linux. On macOS ⌃⌥ (same keys, same place): ⌘⌥ letters are taken by
+ * Finder and other apps (⌘⌥V moves files, ⌘⌥P shows the path bar), and a global shortcut would steal them.
+ */
+const MOD = process.platform === 'darwin' ? 'Control+Alt' : 'CommandOrControl+Alt';
+
 export const DEFAULT_HOTKEYS: HotkeyBindings = {
-  'session.toggle': 'CommandOrControl+Alt+S',
-  'overlay.toggleVisible': 'CommandOrControl+Alt+O',
-  'overlay.toggleMode': 'CommandOrControl+Alt+T',
-  'overlay.opacityDown': 'CommandOrControl+Alt+[',
-  'overlay.opacityUp': 'CommandOrControl+Alt+]',
-  'overlay.scrollUp': 'CommandOrControl+Alt+PageUp',
-  'overlay.scrollDown': 'CommandOrControl+Alt+PageDown',
-  'video.toggle': 'CommandOrControl+Alt+V',
-  screenshot: 'CommandOrControl+Alt+P',
-  'question.answer': 'CommandOrControl+Alt+A',
-  'question.mark': 'CommandOrControl+Alt+Q',
-  'question.prev': 'CommandOrControl+Alt+Up',
-  'question.next': 'CommandOrControl+Alt+Down',
-  'question.dismiss': 'CommandOrControl+Alt+X',
+  'session.toggle': `${MOD}+S`,
+  'overlay.toggleVisible': `${MOD}+O`,
+  'overlay.toggleMode': `${MOD}+T`,
+  'overlay.opacityDown': `${MOD}+[`,
+  'overlay.opacityUp': `${MOD}+]`,
+  'overlay.scrollUp': `${MOD}+PageUp`,
+  'overlay.scrollDown': `${MOD}+PageDown`,
+  'video.toggle': `${MOD}+V`,
+  screenshot: `${MOD}+P`,
+  'question.answer': `${MOD}+A`,
+  'question.mark': `${MOD}+Q`,
+  'question.prev': `${MOD}+Up`,
+  'question.next': `${MOD}+Down`,
+  'question.dismiss': `${MOD}+X`,
 };
 
 const DEFAULTS: Settings = {

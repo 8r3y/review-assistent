@@ -1,5 +1,6 @@
 // IPC contracts shared by main, preload and renderer. Types only plus channel name lists.
 import type { AssistantSettings, LlmProviderId, LlmRoute, LlmTask, Question, Turn } from './assistant';
+import type { PlatformInfo } from './platform';
 import type { AudioActivity, ChannelId, PartialText, Segment, SpeakerId, SttStatus } from './transcript';
 
 export type OverlayMode = 'interactive' | 'passthrough';
@@ -103,6 +104,7 @@ export interface AppState {
   questions: { currentId: string | null; index: number; total: number };
   hotkeys: HotkeyStatus[];
   pipeline: { alive: boolean };
+  platform: PlatformInfo;
 }
 
 /** Options the capture window starts with. */
@@ -118,6 +120,11 @@ export interface VideoStartOptions {
   maxHeight: number;
   maxFrameRate: number;
   bitrate: number;
+  /**
+   * Portal mode: record the screen stream kept open for the session (picked once in the portal dialog)
+   * instead of opening the source picked in the control panel.
+   */
+  sessionSource: boolean;
 }
 
 /** Height of the overlay's top handle bar, px. In passthrough mode the overlay accepts mouse input only there. */
@@ -164,6 +171,8 @@ export interface InvokeMap {
   /** Screens and windows with previews, for the source picker. */
   'video:list-sources': () => VideoSource[];
   'video:set-source': (source: { id: string; name: string } | null) => void;
+  /** Portal mode: pick another source for the running session in the system dialog. */
+  'video:pick-source': () => void;
   /** Recording needs a running session. */
   'video:start': () => void;
   'video:stop': () => void;
@@ -224,6 +233,7 @@ export const INVOKE_CHANNELS = [
   'assistant:set-context',
   'video:list-sources',
   'video:set-source',
+  'video:pick-source',
   'video:start',
   'video:stop',
   'screenshot:take',
@@ -269,6 +279,13 @@ export interface VideoStartResult {
   mimeType: string | null;
 }
 
+export interface ScreenshotResult {
+  /** User-facing error message, or null on success. */
+  error: string | null;
+  /** Base64 PNG. */
+  png: string | null;
+}
+
 /** Control API the capture page exposes on `window.captureControl`; main drives it via executeJavaScript. */
 export interface CaptureControl {
   start(options: CaptureStartOptions): Promise<CaptureStartResult>;
@@ -277,4 +294,11 @@ export interface CaptureControl {
   /** Records the source main's display-media handler picks for a video-only request. */
   startVideo(options: VideoStartOptions): Promise<VideoStartResult>;
   stopVideo(): Promise<void>;
+  /** Portal mode: a PNG frame of the session's screen stream, scaled down to fit `maxSize`. */
+  screenshot(
+    options: VideoStartOptions,
+    maxSize: { width: number; height: number },
+  ): Promise<ScreenshotResult>;
+  /** Portal mode: reopens the session's screen stream, the user picks the source again. */
+  pickSource(options: VideoStartOptions): Promise<{ error: string | null }>;
 }

@@ -4,7 +4,7 @@ import { dirname, join } from 'node:path';
 
 export type SecretName = 'deepgramApiKey' | 'anthropicApiKey' | 'googleApiKey' | 'openaiApiKey';
 
-/** API keys encrypted with the OS keychain (DPAPI on Windows) and stored in userData. */
+/** API keys encrypted with the OS keychain (DPAPI, macOS Keychain, KWallet / GNOME Keyring) and stored in userData. */
 export class SecretStore {
   private data: Partial<Record<SecretName, string>>;
 

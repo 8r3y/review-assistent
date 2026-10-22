@@ -1,16 +1,21 @@
 import { app } from 'electron';
 import { AppController } from './controller';
 import { registerIpc } from './ipc';
+import { OS, applyStartupSwitches } from './platform';
 
-if (!app.requestSingleInstanceLock()) {
+if (!applyStartupSwitches()) {
+  // Relaunching through XWayland.
+} else if (!app.requestSingleInstanceLock()) {
   app.quit();
 } else {
   let controller: AppController | null = null;
 
   app.on('second-instance', () => controller?.showControl());
+  // macOS: a click on the Dock icon.
+  app.on('activate', () => controller?.showControl());
 
   void app.whenReady().then(() => {
-    app.setAppUserModelId('ru.nsstms.review-assistent');
+    if (OS === 'win32') app.setAppUserModelId('ru.nsstms.review-assistent');
     controller = new AppController();
     registerIpc(controller);
     controller.start();

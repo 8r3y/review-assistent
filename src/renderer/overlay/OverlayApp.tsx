@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react';
 import { formatSessionTime } from '@shared/clock';
-import { OVERLAY_HANDLE_HEIGHT, OVERLAY_SCROLLBAR_WIDTH } from '@shared/ipc';
+import { OVERLAY_HANDLE_HEIGHT, OVERLAY_SCROLLBAR_WIDTH, type HotkeyAction } from '@shared/ipc';
+import { hotkeyLabel } from '@shared/platform';
 import { speakerLabel } from '@shared/transcript';
 import { useQuestions } from '../common/useAssistant';
 import { useAppState, useNow } from '../common/useAppState';
@@ -23,6 +24,11 @@ export function OverlayApp(): React.JSX.Element {
   const current = questions.find((q) => q.id === nav.currentId) ?? null;
   const error = state?.capture.error ?? state?.assistant.error ?? (running ? state?.stt.error : null);
   const answerText = current?.answer?.text;
+  /** `Ctrl+Alt+Q` / `⌃⌥Q` followed by `suffix`, or an empty string when the shortcut is not registered. */
+  const key = (action: HotkeyAction, suffix = ''): string => {
+    const label = state ? hotkeyLabel(state.hotkeys, action, state.platform.os) : null;
+    return label ? `${label}${suffix}` : '';
+  };
 
   // Hotkeys scroll by most of a page, keeping a line of context.
   useEffect(
@@ -71,7 +77,7 @@ export function OverlayApp(): React.JSX.Element {
           <button
             className={styles.navButton}
             disabled={nav.index <= 1}
-            title="Предыдущий вопрос (Ctrl+Alt+↑)"
+            title={`Предыдущий вопрос ${key('question.prev')}`.trim()}
             onClick={() => void window.api.invoke('questions:step', -1)}
           >
             ◀
@@ -80,7 +86,7 @@ export function OverlayApp(): React.JSX.Element {
           <button
             className={styles.navButton}
             disabled={nav.index >= nav.total}
-            title="Следующий вопрос (Ctrl+Alt+↓)"
+            title={`Следующий вопрос ${key('question.next')}`.trim()}
             onClick={() => void window.api.invoke('questions:step', 1)}
           >
             ▶
@@ -99,7 +105,9 @@ export function OverlayApp(): React.JSX.Element {
         {error && <p className={styles.error}>{error}</p>}
         {!current && !error && (
           <p className={styles.hint}>
-            {running ? 'Вопросов пока нет · ключевая фраза или Ctrl+Alt+Q' : 'Ctrl+Alt+S — начать сессию'}
+            {running
+              ? `Вопросов пока нет · ключевая фраза${key('question.mark') ? ` или ${key('question.mark')}` : ''}`
+              : `${key('session.toggle', ' — ')}начать сессию`}
           </p>
         )}
         {current && (
@@ -119,8 +127,8 @@ export function OverlayApp(): React.JSX.Element {
             ) : (
               <p className={styles.hint}>
                 {current.worded
-                  ? 'Ctrl+Alt+A — ответить'
-                  : 'Вопрос не определён: Ctrl+Alt+P — скриншот, или уточните и Ctrl+Alt+A'}
+                  ? `${key('question.answer', ' — ')}ответить`
+                  : `Вопрос не определён: ${key('screenshot', ' — ')}скриншот, или уточните и ${key('question.answer') || 'ответьте'}`}
               </p>
             )}
           </>

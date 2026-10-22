@@ -82,6 +82,7 @@ export function registerIpc(app: AppController): void {
       const id = asString(source?.id);
       app.setVideoSource(id ? { id, name: asString(source?.name) ?? '' } : null);
     },
+    'video:pick-source': () => app.pickVideoSource(),
     'video:start': () => app.startVideo(),
     'video:stop': () => app.stopVideo(),
     'screenshot:take': () => app.takeScreenshot(),

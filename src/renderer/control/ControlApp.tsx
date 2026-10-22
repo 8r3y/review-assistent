@@ -8,6 +8,7 @@ import {
   type LlmTask,
 } from '@shared/assistant';
 import { formatSessionTime } from '@shared/clock';
+import { formatAccelerator } from '@shared/platform';
 import { parseCommaList } from '@shared/text';
 import {
   MAX_STT_KEYTERMS,
@@ -54,6 +55,7 @@ export function ControlApp(): React.JSX.Element {
   return (
     <main className={styles.root}>
       <SessionCard state={state} />
+      <PlatformNotes state={state} />
       <Workspace state={state} />
       <AudioCard state={state} />
       <VideoCard state={state} />
@@ -96,6 +98,47 @@ function SessionCard({ state }: { state: AppState }): React.JSX.Element {
       </div>
       {state.capture.error && <p className={styles.bad}>Захват звука: {state.capture.error}</p>}
       {dir && <p className={styles.muted}>Папка сессии: {dir}</p>}
+    </section>
+  );
+}
+
+/** What this OS does differently from Windows, where everything works. */
+function PlatformNotes({ state }: { state: AppState }): React.JSX.Element | null {
+  const { os, captureProtection, portalCapture, weakSecrets } = state.platform;
+  const notes: string[] = [];
+  if (captureProtection === 'none') {
+    notes.push(
+      'Оверлей виден в демонстрации экрана и записи: в Linux нет защиты окна от захвата. Перед демонстрацией скройте его горячей клавишей.',
+    );
+  } else if (captureProtection === 'partial') {
+    notes.push(
+      'Оверлей скрыт только от старых способов захвата: программы на ScreenCaptureKit (macOS 15 и новее — почти все) его видят. Проверьте перед созвоном в вашей программе для звонков; если виден — скрывайте его горячей клавишей на время демонстрации.',
+    );
+  }
+  if (portalCapture) {
+    notes.push(
+      'Wayland: экран или окно для скриншотов и видео выбирается в системном диалоге при первом скриншоте или записи в сессии и держится до её конца.',
+    );
+  }
+  if (weakSecrets) {
+    notes.push(
+      'Не найдено системное хранилище паролей (KWallet / GNOME Keyring): API-ключи сохраняются почти в открытом виде.',
+    );
+  }
+  if (os === 'darwin') {
+    notes.push(
+      'macOS спросит доступ к микрофону, записи экрана и системного аудио. Если звука собеседников нет — проверьте «Конфиденциальность и безопасность → Запись экрана и системного аудио».',
+    );
+  }
+  if (notes.length === 0) return null;
+  return (
+    <section className={styles.card}>
+      <h2>Особенности системы</h2>
+      {notes.map((note) => (
+        <p key={note} className={styles.muted}>
+          {note}
+        </p>
+      ))}
     </section>
   );
 }
@@ -144,6 +187,7 @@ function VideoCard({ state }: { state: AppState }): React.JSX.Element {
   const now = useNow(1000);
   const [sources, setSources] = useState<VideoSource[] | null>(null);
   const { video } = state;
+  const { portalCapture, captureProtection } = state.platform;
   const refresh = (): void => void window.api.invoke('video:list-sources').then(setSources);
   useEffect(refresh, []);
   const sessionRunning = state.session.status === 'running';
@@ -174,7 +218,9 @@ function VideoCard({ state }: { state: AppState }): React.JSX.Element {
         <span className={styles.timer}>
           {video.startedAt !== null ? formatSessionTime(now - video.startedAt) : '—'}
         </span>
-        <span className={styles.muted}>{video.sourceName ?? 'Основной экран'}</span>
+        <span className={styles.muted}>
+          {video.sourceName ?? (portalCapture ? 'выбирается в системном диалоге' : 'Основной экран')}
+        </span>
         <span className={styles.spacer} />
         <button
           className={styles.secondary}
@@ -183,11 +229,27 @@ function VideoCard({ state }: { state: AppState }): React.JSX.Element {
         >
           Скриншот к вопросу
         </button>
-        <button className={styles.secondary} disabled={recording || busy} onClick={refresh}>
-          Обновить список
-        </button>
+        {portalCapture ? (
+          <button
+            className={styles.secondary}
+            disabled={!sessionRunning || recording || busy}
+            onClick={() => void window.api.invoke('video:pick-source')}
+          >
+            Выбрать источник…
+          </button>
+        ) : (
+          <button className={styles.secondary} disabled={recording || busy} onClick={refresh}>
+            Обновить список
+          </button>
+        )}
       </div>
       {video.error && <p className={styles.bad}>{video.error}</p>}
+      {portalCapture && (
+        <p className={styles.muted}>
+          Экран или окно выбирается в системном диалоге при первом скриншоте или записи в сессии и
+          используется до её конца. «Выбрать источник…» — сменить его.
+        </p>
+      )}
       <div className={styles.sources}>
         {sources?.map((s) => (
           <button
@@ -207,12 +269,13 @@ function VideoCard({ state }: { state: AppState }): React.JSX.Element {
       </div>
       <p className={styles.muted}>
         Запись идёт во время сессии в её папку (до 1920×1080, 30 к/с). При остановке сессии в видео вшивается
-        звук разговора. Оверлей в запись не попадает. Горячая клавиша — в таблице ниже.
+        звук разговора.{captureProtection === 'none' ? '' : ' Оверлей в запись не попадает.'} Горячая клавиша
+        — в таблице ниже.
       </p>
       <p className={styles.muted}>
         Скриншот снимает тот же источник и добавляется к последнему вопросу вместе с новыми фразами
-        собеседника — ответ генерируется заново с учётом экрана (схема, код для лайвкодинга). Оверлей на
-        скриншот не попадает.
+        собеседника — ответ генерируется заново с учётом экрана (схема, код для лайвкодинга).
+        {captureProtection === 'none' ? '' : ' Оверлей на скриншот не попадает.'}
       </p>
     </section>
   );
@@ -689,7 +752,7 @@ function HotkeysCard({ state }: { state: AppState }): React.JSX.Element {
             <tr key={h.action}>
               <td>{HOTKEY_LABELS[h.action]}</td>
               <td>
-                <kbd>{h.accelerator.replace('CommandOrControl', 'Ctrl')}</kbd>
+                <kbd>{formatAccelerator(h.accelerator, state.platform.os)}</kbd>
               </td>
               <td className={!h.available ? styles.muted : h.registered ? styles.ok : styles.bad}>
                 {!h.available ? 'в разработке' : h.registered ? 'активна' : 'занята другим приложением'}

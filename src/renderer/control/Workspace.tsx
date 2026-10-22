@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { Question, QuestionStatus } from '@shared/assistant';
 import { formatSessionTime } from '@shared/clock';
 import type { AppState } from '@shared/ipc';
+import { hotkeyLabel } from '@shared/platform';
 import { OWNER, speakerLabel } from '@shared/transcript';
 import { useQuestions, useTurns } from '../common/useAssistant';
 import { useTranscript } from '../common/useTranscript';
@@ -145,6 +146,7 @@ function QuestionsTab({ state }: { state: AppState }): React.JSX.Element {
   const running = state.session.status === 'running';
   const visible = questions.filter((q) => q.status !== 'dismissed');
   const dismissed = questions.length - visible.length;
+  const markKey = hotkeyLabel(state.hotkeys, 'question.mark', state.platform.os);
   return (
     <div className={styles.transcript}>
       {(!state.assistant.keys[state.assistant.analyze.provider] ||
@@ -155,8 +157,9 @@ function QuestionsTab({ state }: { state: AppState }): React.JSX.Element {
       )}
       {visible.length === 0 && (
         <p className={styles.muted}>
-          Вопросов пока нет. Скажите ключевую фразу (например, «хороший вопрос») или нажмите Ctrl+Alt+Q —
-          последние фразы собеседника станут вопросом, и ответ на него сгенерируется сразу.
+          Вопросов пока нет. Скажите ключевую фразу (например, «хороший вопрос»)
+          {markKey ? ` или нажмите ${markKey}` : ''} — последние фразы собеседника станут вопросом, и ответ на
+          него сгенерируется сразу.
         </p>
       )}
       {visible.map((q, i) => (

@@ -25,10 +25,17 @@ import type { PipelineToMain } from '@shared/pipeline-protocol';
 import { parseCommaList } from '@shared/text';
 import type { Segment } from '@shared/transcript';
 import { checkDeepgramSettings } from './deepgram-check';
-import { CaptureHost, captureScreenshot, installDisplayMediaHandler, listVideoSources } from './capture-host';
+import {
+  CaptureHost,
+  SCREENSHOT_SIZE,
+  captureScreenshot,
+  installDisplayMediaHandler,
+  listVideoSources,
+} from './capture-host';
 import { registerHotkeys, unregisterHotkeys } from './hotkeys';
 import { readOwnerContext, writeOwnerContext } from './owner-context';
 import { PipelineHost } from './pipeline-host';
+import { ensureMicrophoneAccess, platformInfo } from './platform';
 import { QuestionsView } from './questions-view';
 import { SecretStore, type SecretName } from './secrets';
 import { SessionManager } from './session';
@@ -44,7 +51,7 @@ const PIPELINE_STOP_TIMEOUT_MS = 8000;
 /** Assistant errors (bad key, refusal…) stay visible this long. */
 const ASSISTANT_ERROR_MS = 12_000;
 /** Full HD at 30 fps keeps screen text readable while the encoder stays light. */
-const VIDEO_OPTIONS: VideoStartOptions = {
+const VIDEO_OPTIONS: Omit<VideoStartOptions, 'sessionSource'> = {
   maxWidth: 1920,
   maxHeight: 1080,
   maxFrameRate: 30,
@@ -97,13 +104,17 @@ export class AppController {
       questions: this.questions.nav(),
       hotkeys: [],
       pipeline: { alive: false },
+      platform: platformInfo(),
     });
     this.store.subscribe((state) => broadcast('app:state', state));
     this.pipeline.onMessage((message) => this.handlePipeline(message));
   }
 
   start(): void {
-    installDisplayMediaHandler();
+    installDisplayMediaHandler({
+      portal: this.portal,
+      onPortalSource: (sourceName) => this.setVideoState({ sourceName }),
+    });
     const { overlay } = this.settings.get();
     this.overlay = new OverlayWindow({
       ...overlay,
@@ -163,8 +174,32 @@ export class AppController {
     this.session.appendVideo(chunk);
   }
 
+  /** Empty in portal mode: listing sources there opens the portal dialog. */
   listVideoSources(): Promise<VideoSource[]> {
-    return listVideoSources();
+    return this.portal ? Promise.resolve([]) : listVideoSources();
+  }
+
+  /** Portal mode: the user picks another screen or window for the running session. */
+  async pickVideoSource(): Promise<void> {
+    if (!this.portal || !this.requireRunningSession()) return;
+    if (this.store.get().video.status !== 'idle') {
+      this.setVideoState({ error: 'Источник меняется, когда видео не пишется' });
+      return;
+    }
+    try {
+      this.setVideoState({ error: null });
+      await this.capture.pickSessionSource(this.videoOptions());
+    } catch (e) {
+      this.setVideoState({ error: e instanceof Error ? e.message : String(e) });
+    }
+  }
+
+  private get portal(): boolean {
+    return this.store.get().platform.portalCapture;
+  }
+
+  private videoOptions(): VideoStartOptions {
+    return { ...VIDEO_OPTIONS, sessionSource: this.portal };
   }
 
   setVideoSource(source: { id: string; name: string } | null): void {
@@ -184,7 +219,7 @@ export class AppController {
     this.setVideoState({ status: 'starting', error: null });
     this.session.beginVideo(video.sourceName ?? 'Основной экран');
     try {
-      const { startedAt, mimeType } = await this.capture.startVideo(source, VIDEO_OPTIONS);
+      const { startedAt, mimeType } = await this.capture.startVideo(source, this.videoOptions());
       if (this.store.get().session.status !== 'running') {
         // The session is stopping: it closed the video file before the recorder came up.
         await this.capture.stopVideo();
@@ -225,7 +260,9 @@ export class AppController {
     if (!this.requireRunningSession()) return;
     const { sourceId, sourceName } = this.store.get().video;
     try {
-      const png = await captureScreenshot(sourceId ? { id: sourceId, name: sourceName } : null);
+      const png = this.portal
+        ? await this.capture.screenshotFromSession(this.videoOptions(), SCREENSHOT_SIZE)
+        : await captureScreenshot(sourceId ? { id: sourceId, name: sourceName } : null);
       const file = this.session.saveScreenshot(png);
       if (!file) return;
       this.pipeline.send({ type: 'assistant:screenshot', file, png: png.toString('base64') });
@@ -302,6 +339,8 @@ export class AppController {
     const { port1, port2 } = new MessageChannelMain();
     this.pipeline.send({ type: 'audio-port' }, [port2]);
     try {
+      const micDenied = await ensureMicrophoneAccess();
+      if (micDenied) throw new Error(micDenied);
       const recordingStartedAt = await this.capture.start(
         { micDeviceId: audio.micDeviceId, recordAudio: audio.recordAudio },
         port1,
@@ -339,7 +378,13 @@ export class AppController {
       ...s,
       session: { status: 'idle', startedAt: null, dir: null },
       capture: { status: 'idle', error: warnings.join('; ') || null },
-      video: { ...s.video, status: 'idle', startedAt: null },
+      // Portal mode: the source picked for the session is closed with it.
+      video: {
+        ...s.video,
+        status: 'idle',
+        startedAt: null,
+        sourceName: this.portal ? null : s.video.sourceName,
+      },
       stt: { ...s.stt, status: { mic: 'off', system: 'off' } },
     }));
     // After the files are finalized: the videos are complete by now.
